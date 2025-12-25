@@ -878,17 +878,21 @@ with tabs[2]:
 
     st.markdown("### Current Telestrations standings (raw)")
     tel_raw, tel_bw, tel_rp, tel_adj = compute_telestrations_raw(players)
-    tel_order = sort_with_tiebreakers(players, tel_raw, [(tel_bw, True), (tel_rp, True)], True)
+    tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
+
     detail = []
-    for i, p in enumerate(tel_order):
-        detail.append({
-            "rank": i+1,
-            "player": display_player(p, name_map),
-            "points": tel_raw[p],
-            "booklet_wins": tel_bw[p],
-            "response_points": tel_rp[p],
-            "adjustment": tel_adj[p],
-        })
+    place = 1
+    for group in tel_groups:
+        for p in group:
+            detail.append({
+                "place": place,
+                "player": display_name(p),
+                "raw_points": tel_raw[p],
+                "booklet_wins": tel_bw[p],
+                "adjustment": tel_adj[p],
+            })
+        place += len(group)
+
     st.dataframe(pd.DataFrame(detail), width="stretch")
     st.caption("Tie-breakers: points → booklet wins → response points → letter.")
 
