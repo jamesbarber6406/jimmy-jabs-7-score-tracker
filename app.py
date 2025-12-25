@@ -302,7 +302,7 @@ def assign_points_by_place(groups, place_to_points, default_points=None, no_skip
 # Tie groups + JJ skipped placements (no letter fallback)
 # ----------------------------
 def build_tie_groups(players, primary, tiebreakers):
-    \"\"\"Return tie groups ordered best->worst using only provided criteria.\"\"\"
+    """Return tie groups ordered best->worst using only provided criteria."""
     def key(p):
         parts = [primary.get(p, 0)]
         for d, higher_is_better in tiebreakers:
@@ -324,7 +324,7 @@ def build_tie_groups(players, primary, tiebreakers):
     return groups
 
 def jj_points_skipping_from_groups(groups, n_players):
-    \"\"\"Two tie for 1st => both get 9, next gets 7 (skipped placements).\"\"\"
+    """Two tie for 1st => both get 9, next gets 7 (skipped placements)."""
     pts = {p: 0 for grp in groups for p in grp}
     place = 1
     for grp in groups:
@@ -646,8 +646,6 @@ def compute_all(players):
 
 # ----------------------------
 # Admin auth (PIN)
-# ----------------------------
- (PIN)
 # ----------------------------
 def is_admin() -> bool:
     pin = safe_get_secret("ADMIN_PIN")
