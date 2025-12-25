@@ -43,3 +43,7 @@ Note: Supabase direct connections can be IPv6-only; if your host needs IPv4, use
 This version supports:
 - Local run with SQLite (`jimmy_jabs.db`)
 - Cloud deployment with Postgres if you set `DATABASE_URL` in Streamlit secrets
+
+
+## Note
+Updated to use `width='stretch'` instead of deprecated `use_container_width`.

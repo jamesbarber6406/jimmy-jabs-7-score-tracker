@@ -516,7 +516,7 @@ with tabs[0]:
     st.caption(f"Database backend: **{db.kind}**")
     if db.kind == "sqlite":
         st.info("Local mode (SQLite). For a shareable URL with everyone entering scores, deploy to Streamlit Community Cloud and set DATABASE_URL for Postgres.")
-    edited = st.data_editor(players_df, use_container_width=True, num_rows="fixed")
+    edited = st.data_editor(players_df, width='stretch', num_rows="fixed")
     if st.button("Save player names"):
         for _, row in edited.iterrows():
             db.execute("UPDATE players SET name=? WHERE letter=?", [row["name"], row["letter"]])
@@ -567,7 +567,7 @@ with tabs[1]:
                     "Match 1": f'{display_team(m1["team_a"], name_map)} vs {display_team(m1["team_b"], name_map)}',
                     "Match 2": f'{display_team(m2["team_a"], name_map)} vs {display_team(m2["team_b"], name_map)}',
                 })
-            st.dataframe(pd.DataFrame(preview), use_container_width=True)
+            st.dataframe(pd.DataFrame(preview), width='stretch')
         else:
             st.info("No schedule yet. Generate one.")
 
@@ -603,7 +603,7 @@ with tabs[2]:
     round_no = st.number_input("Round #", min_value=1, step=1, value=1, key="tel_round")
     winners = st.multiselect("Booklet winners (can be empty)", players, default=[], key="tel_winners", format_func=lambda x: display_player(x, name_map))
     df = pd.DataFrame({"player": players, "response_points": [0]*len(players)})
-    edited = st.data_editor(df, use_container_width=True, num_rows="fixed", key="tel_editor")
+    edited = st.data_editor(df, width='stretch', num_rows="fixed", key="tel_editor")
     if st.button("Save telestrations round"):
         resp = {row["player"]: int(row["response_points"]) for _, row in edited.iterrows()}
         insert_event_result("Telestrations", int(round_no), {"round_no": int(round_no), "booklet_winners": winners, "response_points": resp})
@@ -648,7 +648,7 @@ with tabs[5]:
     blower = st.selectbox("Blower", players, key="br_blower", format_func=lambda x: display_player(x, name_map))
     actual = st.number_input("Actual BAC", min_value=0.0, step=0.001, value=0.000, format="%.3f", key="br_actual")
     df = pd.DataFrame({"player": players, "guess": [""]*len(players)})
-    edited = st.data_editor(df, use_container_width=True, num_rows="fixed", key="br_editor")
+    edited = st.data_editor(df, width='stretch', num_rows="fixed", key="br_editor")
     if st.button("Save breathalyzer session"):
         guesses = {}
         for _, row in edited.iterrows():
@@ -672,7 +672,7 @@ with tabs[6]:
     st.markdown("### Overall (Jimmy Jabs points) — only completed events count")
     df_total = pd.DataFrame([{"player": display_player(p, name_map), "jj_total": totals[p]} for p in players])\
         .sort_values(["jj_total", "player"], ascending=[False, True])
-    st.dataframe(df_total, use_container_width=True)
+    st.dataframe(df_total, width='stretch')
 
 with tabs[7]:
     st.subheader("Admin (delete entries)")
