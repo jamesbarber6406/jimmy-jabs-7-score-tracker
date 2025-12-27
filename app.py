@@ -866,12 +866,15 @@ with tabs[1]:
             preview = []
             for rno in sorted(schedule.keys()):
                 r = schedule[rno]
-                m1, m2 = r["matches"]
+                matches = r.get("matches", []) or []
+                m1 = matches[0] if len(matches) > 0 else None
+                m2 = matches[1] if len(matches) > 1 else None
+
                 preview.append({
                     "Round": rno,
-                    "Bye": ((display_player(r["bye"], name_map) if r.get("bye") else "—") if r.get("bye") else "—"),
-                    "Match 1": f'{display_team(m1["team_a"], name_map)} vs {display_team(m1["team_b"], name_map)}',
-                    "Match 2": f'{display_team(m2["team_a"], name_map)} vs {display_team(m2["team_b"], name_map)}',
+                    "Bye": (display_player(r["bye"], name_map) if r.get("bye") else "—"),
+                    "Match 1": (f'{display_team(m1["team_a"], name_map)} vs {display_team(m1["team_b"], name_map)}' if m1 else "—"),
+                    "Match 2": (f'{display_team(m2["team_a"], name_map)} vs {display_team(m2["team_b"], name_map)}' if m2 else "—"),
                 })
             st.dataframe(pd.DataFrame(preview), width="stretch")
         else:
