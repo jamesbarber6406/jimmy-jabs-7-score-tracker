@@ -869,7 +869,7 @@ with tabs[1]:
                 m1, m2 = r["matches"]
                 preview.append({
                     "Round": rno,
-                    "Bye": display_player(r["bye"], name_map),
+                    "Bye": ((display_player(r["bye"], name_map) if r.get("bye") else "—") if r.get("bye") else "—"),
                     "Match 1": f'{display_team(m1["team_a"], name_map)} vs {display_team(m1["team_b"], name_map)}',
                     "Match 2": f'{display_team(m2["team_a"], name_map)} vs {display_team(m2["team_b"], name_map)}',
                 })

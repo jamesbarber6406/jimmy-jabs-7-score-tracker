@@ -82,3 +82,6 @@ Fixed tie-group UI functions and further Spoons countback logic.
 
 ## v5.3.2
 - fixed broken reset function
+
+## v5.3.3
+- fixed issues with bye rounds for beer pong
