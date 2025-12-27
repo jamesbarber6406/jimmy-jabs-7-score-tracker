@@ -1,5 +1,11 @@
 
 import streamlit as st
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+except Exception:
+    st_autorefresh = None
+
 import json
 from datetime import datetime
 import pandas as pd
@@ -12,9 +18,9 @@ DEFAULT_PLAYERS = list("ABCDEFGHI")
 EVENTS = ["Beer Pong", "Telestrations", "Spoons", "Secret Hitler", "Breathalyzer"]
 
 # Beer Pong scoring
-BEERPONG_WIN_PTS = 2
-BEERPONG_LOSS_PTS = 0
-BEERPONG_CLOSE_LOSS_PTS = 1
+BEERPONG_WIN_PTS = 4
+BEERPONG_LOSS_PTS = 2
+BEERPONG_CLOSE_LOSS_PTS = 3
 
 # Secret Hitler scoring
 SH_WIN_PTS = 4
@@ -378,40 +384,135 @@ def score_schedule(rounds_payload, players):
 
     return rep_team_pen + rep_opp_pen + (var_gp * 10) + (var_bp * 10)
 
-def generate_equal_beerpong_schedule(players, rounds=9, tries=3000, seed=42):
+
+def generate_equal_beerpong_schedule(players, rounds=5, games_per_player=4, tries=6000, seed=42):
+    """Generate a 2v2 Beer Pong schedule.
+
+    Goal: each player plays exactly `games_per_player` matches.
+    With 9 players and games_per_player=4 -> total matches = 9.
+    We then pack those matches into `rounds` rounds (default 5), with up to 2 matches per round.
+    """
     rng = random.Random(seed)
     players = list(players)
-    if (8 * rounds) % len(players) != 0:
-        raise ValueError("Equal games with 2v2 requires rounds multiple of 9 (9,18,...).")
 
-    games_per_player = (8 * rounds) // len(players)
-    byes_per_player = rounds - games_per_player
-    bye_list = []
-    for p in players:
-        bye_list.extend([p] * byes_per_player)
-    assert len(bye_list) == rounds
+    total_slots = len(players) * games_per_player
+    if total_slots % 4 != 0:
+        raise ValueError("games_per_player * n_players must be divisible by 4 for 2v2 matches.")
+    total_matches = total_slots // 4
 
-    best, best_score = None, float("inf")
+    # Helpers to score schedule quality: balance teammates/opponents and bye distribution across rounds.
+    def schedule_score(matches):
+        teammate = {p: {q: 0 for q in players} for p in players}
+        opp = {p: {q: 0 for q in players} for p in players}
+        for (a1,a2,b1,b2) in matches:
+            A = [a1,a2]; B=[b1,b2]
+            teammate[a1][a2] += 1; teammate[a2][a1] += 1
+            for x in A:
+                for y in B:
+                    opp[x][y] += 1
+                    opp[y][x] += 1
+        # Penalize repeated teammates heavily, repeated opponents lightly
+        rep_team = sum(max(0, teammate[p][q]-1) for p in players for q in players if p<q)
+        rep_opp = sum(max(0, opp[p][q]-2) for p in players for q in players if p<q)
+        return rep_team*5 + rep_opp*1
+
+    best_matches, best_score = None, float("inf")
+
     for _ in range(tries):
-        rng.shuffle(bye_list)
-        rounds_payload = []
-        for r in range(rounds):
-            bye = bye_list[r]
-            active = [p for p in players if p != bye]
-            rng.shuffle(active)
-            matches = []
-            for chunk in [active[:4], active[4:8]]:
-                rng.shuffle(chunk)
-                matches.append({"team_a": chunk[:2], "team_b": chunk[2:]})
-            rounds_payload.append({"round_no": r+1, "bye": bye, "matches": matches})
-        sc = score_schedule(rounds_payload, players)
-        if sc < best_score:
-            best, best_score = rounds_payload, sc
-    return best, best_score
+        remaining = {p: games_per_player for p in players}
+        matches = []
 
-# ----------------------------
-# Event computations
-# ----------------------------
+        # Build matches greedily but randomized
+        while len(matches) < total_matches:
+            # pick 4 players with remaining games, prefer those with highest remaining
+            pool = [p for p in players if remaining[p] > 0]
+            if len(pool) < 4:
+                break
+            pool.sort(key=lambda p: (remaining[p], rng.random()), reverse=True)
+            pick = pool[:min(len(pool), 7)]
+            four = rng.sample(pick, 4)
+
+            # try a few team splits and keep the one with minimal local repeat teammates
+            best_split = None
+            best_local = None
+            a,b,c,d = four
+            splits = [((a,b),(c,d)), ((a,c),(b,d)), ((a,d),(b,c))]
+            rng.shuffle(splits)
+            for (ta,tb) in splits:
+                # local repeat measure: avoid same teammate pairs in this candidate set
+                local = 0
+                for (x,y) in [(ta[0],ta[1]), (tb[0],tb[1])]:
+                    for (u,v,w,z) in matches[-6:]:
+                        if set([x,y])==set([u,v]) or set([x,y])==set([w,z]):
+                            local += 2
+                if best_local is None or local < best_local:
+                    best_local = local
+                    best_split = (ta, tb)
+
+            (ta, tb) = best_split
+            (a1,a2) = ta; (b1,b2) = tb
+            # ensure all have remaining
+            if min(remaining[a1],remaining[a2],remaining[b1],remaining[b2]) <= 0:
+                continue
+            matches.append((a1,a2,b1,b2))
+            for p in [a1,a2,b1,b2]:
+                remaining[p] -= 1
+
+        if len(matches) != total_matches:
+            continue
+
+        score = schedule_score(matches)
+        if score < best_score:
+            best_score = score
+            best_matches = matches
+
+    if best_matches is None:
+        raise ValueError("Could not generate a schedule with the requested constraints.")
+
+    # Pack matches into rounds (up to 2 matches per round) without player overlap within a round.
+    rounds_list = [[] for _ in range(rounds)]
+    used_in_round = [set() for _ in range(rounds)]
+    # shuffle to pack varied
+    rng.shuffle(best_matches)
+    for match in best_matches:
+        a1,a2,b1,b2 = match
+        players_in = {a1,a2,b1,b2}
+        placed = False
+        for r in range(rounds):
+            if len(rounds_list[r]) >= 2:
+                continue
+            if used_in_round[r].isdisjoint(players_in):
+                rounds_list[r].append(match)
+                used_in_round[r].update(players_in)
+                placed = True
+                break
+        if not placed:
+            # if we can't place without overlap, just place in the round with space (overlap allowed as last resort)
+            for r in range(rounds):
+                if len(rounds_list[r]) < 2:
+                    rounds_list[r].append(match)
+                    used_in_round[r].update(players_in)
+                    placed = True
+                    break
+        if not placed:
+            # shouldn't happen
+            rounds_list.append([match])
+            used_in_round.append(set(players_in))
+
+    # Build stored schedule format expected by UI: each round has 2 match slots; if missing, use None.
+    schedule = []
+    for i, matches in enumerate(rounds_list, start=1):
+        entry = {"round_no": i, "matches": []}
+        for mm in matches:
+            a1,a2,b1,b2 = mm
+            entry["matches"].append({"team_a": [a1,a2], "team_b": [b1,b2]})
+        while len(entry["matches"]) < 2:
+            entry["matches"].append(None)
+        schedule.append(entry)
+
+    return schedule, best_score
+
+
 def compute_beerpong_raw(players):
     results = fetch_event_results("Beer Pong")
     raw = {p: 0 for p in players}
@@ -613,10 +714,9 @@ def compute_all(players):
     tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
     tel_jj = jj_points_skipping_from_groups(tel_groups, len(players))
 
-    # Spoons: points -> countback (more 1sts, then 2nds, ...) -> tie
+    # Spoons: points only -> tie
     sp_raw, sp_adj = compute_spoons_raw(players)
-    sp_cb = compute_spoons_countback(players)
-    sp_groups = build_tie_groups(players, sp_raw, [(sp_cb, True)])
+    sp_groups = build_tie_groups(players, sp_raw, [])
     sp_jj = jj_points_skipping_from_groups(sp_groups, len(players))
 
     # Secret Hitler: points -> wins -> spicy wins -> tie
@@ -632,7 +732,7 @@ def compute_all(players):
     computed = {
         "Beer Pong": {"raw": bp_raw, "groups": bp_groups, "jj": bp_jj, "wins": bp_wins, "cups": bp_cups, "cups_rem": bp_rem, "adj": bp_adj},
         "Telestrations": {"raw": tel_raw, "groups": tel_groups, "jj": tel_jj, "booklet_wins": tel_bw, "response_points": tel_rp, "adj": tel_adj},
-        "Spoons": {"raw": sp_raw, "groups": sp_groups, "jj": sp_jj, "countback": sp_cb if "sp_cb" in locals() else None, "adj": sp_adj},
+        "Spoons": {"raw": sp_raw, "groups": sp_groups, "jj": sp_jj, "adj": sp_adj},
         "Secret Hitler": {"raw": sh_raw, "groups": sh_groups, "jj": sh_jj, "wins": sh_wins, "spicy_wins": sh_spicy, "adj": sh_adj},
         "Breathalyzer": {"raw": br_raw, "groups": br_groups, "jj": br_jj, "closest": br_closest, "avg_error": br_avgerr, "adj": br_adj},
     }
@@ -732,22 +832,33 @@ with tabs[1]:
 
     c1, c2 = st.columns([1, 1])
     with c1:
-        rounds = st.number_input("Rounds", min_value=9, step=9, value=int(get_setting("beerpong_rounds", "9")), disabled=is_event_locked("Beer Pong"))
-        seed = st.number_input("Schedule seed", min_value=1, step=1, value=int(get_setting("beerpong_seed", "42")), disabled=is_event_locked("Beer Pong"))
-        tries = st.number_input("Generator tries", min_value=500, step=500, value=int(get_setting("beerpong_tries", "3000")), disabled=is_event_locked("Beer Pong"))
+        st.write("Rounds: 5 (target: everyone plays 4 games; total 9 matches)")
+        seed = st.number_input(
+            "Schedule seed",
+            min_value=1,
+            step=1,
+            value=int(get_setting("beerpong_seed", "42")),
+            disabled=is_event_locked("Beer Pong"),
+        )
+        tries = st.number_input(
+            "Generator tries",
+            min_value=500,
+            step=500,
+            value=int(get_setting("beerpong_tries", "6000")),
+            disabled=is_event_locked("Beer Pong"),
+        )
         if st.button("Generate schedule", disabled=is_event_locked("Beer Pong")):
-            if (8 * int(rounds)) % len(players) != 0:
-                st.error("Equal games not possible unless rounds is a multiple of 9 (9, 18, 27...).")
-            else:
-                best, best_score = generate_equal_beerpong_schedule(players, rounds=int(rounds), tries=int(tries), seed=int(seed))
-                clear_schedule()
-                for r in best:
-                    store_schedule(r["round_no"], r)
-                upsert_setting("beerpong_rounds", str(int(rounds)))
-                upsert_setting("beerpong_seed", str(int(seed)))
-                upsert_setting("beerpong_tries", str(int(tries)))
-                st.success(f"Generated. Score (lower better): {best_score:.2f}")
-                schedule = load_schedule()
+            best, best_score = generate_equal_beerpong_schedule(
+                players, rounds=5, games_per_player=4, tries=int(tries), seed=int(seed)
+            )
+            clear_schedule()
+            for r in best:
+                store_schedule(r["round_no"], r)
+            upsert_setting("beerpong_rounds", "5")
+            upsert_setting("beerpong_seed", str(int(seed)))
+            upsert_setting("beerpong_tries", str(int(tries)))
+            st.success(f"Generated. Score (lower better): {best_score:.2f}")
+            schedule = load_schedule()
 
     with c2:
         if schedule:
@@ -770,30 +881,57 @@ with tabs[1]:
         st.markdown("### Log a match")
         rno = st.selectbox("Round to log", sorted(schedule.keys()))
         r = schedule[rno]
-        match_idx = st.radio("Match", [1, 2], horizontal=True)
-        m = r["matches"][match_idx - 1]
-        st.write("Team A:", display_team(m["team_a"], name_map), "vs Team B:", display_team(m["team_b"], name_map))
 
-        winner = st.radio("Winner", ["A", "B"], horizontal=True, disabled=is_event_locked("Beer Pong"))
-        a_rem = st.number_input("Cups remaining (Team A)", min_value=0, max_value=6, value=0, step=1, disabled=is_event_locked("Beer Pong"))
-        b_rem = st.number_input("Cups remaining (Team B)", min_value=0, max_value=6, value=0, step=1, disabled=is_event_locked("Beer Pong"))
-        suggested_close = (winner == "A" and a_rem == 0 and b_rem == 1) or (winner == "B" and b_rem == 0 and a_rem == 1)
-        close_loss = st.checkbox("Close loss (both teams were at 1 cup)", value=suggested_close, disabled=is_event_locked("Beer Pong"))
+        # Only show matches that exist (some rounds may have 1 match)
+        available = [i + 1 for i, mm in enumerate(r["matches"]) if mm is not None]
+        if not available:
+            st.info("No matches scheduled for this round.")
+        else:
+            match_idx = st.radio("Match", available, horizontal=True)
+            m = r["matches"][match_idx - 1]
 
-        if st.button("Save match result", disabled=is_event_locked("Beer Pong")):
-            insert_event_result("Beer Pong", int(rno), {
-                "round_no": int(rno),
-                "match_idx": int(match_idx),
-                "team_a": m["team_a"],
-                "team_b": m["team_b"],
-                "winner": winner,
-                "cups_remaining_a": int(a_rem),
-                "cups_remaining_b": int(b_rem),
-                "close_loss": bool(close_loss),
-            })
-            st.success("Saved.")
-            st.rerun()
+            st.write(
+                "Team A:", display_team(m["team_a"], name_map),
+                "vs Team B:", display_team(m["team_b"], name_map)
+            )
 
+            with st.form(f"bp_log_form_{rno}_{match_idx}", clear_on_submit=True):
+                entered_by = st.selectbox(
+                    "Entered by",
+                    [""] + players,
+                    format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+                    disabled=is_event_locked("Beer Pong"),
+                )
+
+                winner = st.radio("Winner", ["A", "B"], horizontal=True, disabled=is_event_locked("Beer Pong"))
+                a_rem = st.number_input(
+                    "Cups remaining (Team A)", min_value=0, max_value=6, value=0, step=1,
+                    disabled=is_event_locked("Beer Pong")
+                )
+                b_rem = st.number_input(
+                    "Cups remaining (Team B)", min_value=0, max_value=6, value=0, step=1,
+                    disabled=is_event_locked("Beer Pong")
+                )
+                suggested_close = (winner == "A" and a_rem == 0 and b_rem == 1) or (winner == "B" and b_rem == 0 and a_rem == 1)
+                close_loss = st.checkbox(
+                    "Close loss (both teams were at 1 cup)", value=suggested_close,
+                    disabled=is_event_locked("Beer Pong")
+                )
+
+                if st.form_submit_button("Save match result", disabled=is_event_locked("Beer Pong")):
+                    insert_event_result("Beer Pong", int(rno), {
+                        "round_no": int(rno),
+                        "match_idx": int(match_idx),
+                        "team_a": m["team_a"],
+                        "team_b": m["team_b"],
+                        "winner": winner,
+                        "cups_remaining_a": int(a_rem),
+                        "cups_remaining_b": int(b_rem),
+                        "close_loss": bool(close_loss),
+                        "entered_by": (entered_by if entered_by else None),
+                    })
+                    st.success("Saved.")
+                    st.rerun()
     st.divider()
     st.markdown("### Logged matches")
     bp_results = fetch_event_results("Beer Pong")
@@ -840,6 +978,7 @@ with tabs[1]:
             "wins": bp_wins[p],
             "cups_sunk": bp_cups[p],
             "cups_remaining_total": bp_rem[p],
+            "wins": bp_wins[p],
             "games": bp_games[p],
             "adjustment": bp_adj[p],
         })
@@ -852,17 +991,46 @@ with tabs[2]:
     if is_event_locked("Telestrations"):
         st.warning("Telestrations is locked. Admin can unlock in Setup.")
 
-    round_no = st.number_input("Round #", min_value=1, step=1, value=1, key="tel_round", disabled=is_event_locked("Telestrations"))
-    winners = st.multiselect("Booklet winners (can be empty)", players, default=[], key="tel_winners",
-                            format_func=lambda x: display_player(x, name_map), disabled=is_event_locked("Telestrations"))
-    df = pd.DataFrame({"player": players, "response_points": [0]*len(players)})
-    edited = st.data_editor(df, width="stretch", num_rows="fixed", key="tel_editor", disabled=is_event_locked("Telestrations"))
-    if st.button("Save telestrations round", disabled=is_event_locked("Telestrations")):
-        resp = {row["player"]: int(row["response_points"]) for _, row in edited.iterrows()}
-        insert_event_result("Telestrations", int(round_no), {"round_no": int(round_no), "booklet_winners": winners, "response_points": resp})
-        st.success("Saved.")
-        st.rerun()
+        round_no = st.number_input(
+            "Round #", min_value=1, step=1, value=1, key="tel_round",
+            disabled=is_event_locked("Telestrations")
+        )
 
+        with st.form("tel_round_form", clear_on_submit=True):
+            entered_by = st.selectbox(
+                "Entered by",
+                [""] + players,
+                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+                disabled=is_event_locked("Telestrations"),
+            )
+
+            winners = st.multiselect(
+                "Booklet winners (can be empty)",
+                players,
+                default=[],
+                key="tel_winners",
+                format_func=lambda x: display_player(x, name_map),
+                disabled=is_event_locked("Telestrations"),
+            )
+
+            df = pd.DataFrame({"player": players, "response_points": [0] * len(players)})
+            edited = st.data_editor(
+                df,
+                width="stretch",
+                num_rows="fixed",
+                key="tel_editor",
+                disabled=is_event_locked("Telestrations"),
+            )
+
+            if st.form_submit_button("Save telestrations round", disabled=is_event_locked("Telestrations")):
+                resp = {row["player"]: int(row["response_points"]) for _, row in edited.iterrows()}
+                insert_event_result(
+                    "Telestrations",
+                    int(round_no),
+                    {"round_no": int(round_no), "booklet_winners": winners, "response_points": resp, "entered_by": (entered_by if entered_by else None)},
+                )
+                st.success("Saved.")
+                st.rerun()
     st.divider()
     tel_results = fetch_event_results("Telestrations")
     if tel_results:
@@ -886,7 +1054,7 @@ with tabs[2]:
         for p in group:
             detail.append({
                 "place": place,
-                "player": display_player(p, name_map),
+                "player": display_name(p),
                 "raw_points": tel_raw[p],
                 "booklet_wins": tel_bw[p],
                 "adjustment": tel_adj[p],
@@ -894,7 +1062,7 @@ with tabs[2]:
         place += len(group)
 
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → booklet wins → tie (no letter fallback).")
+    st.caption("Tie-breakers: points → booklet wins → response points → letter.")
 
 # --- Spoons ---
 with tabs[3]:
@@ -902,17 +1070,39 @@ with tabs[3]:
     if is_event_locked("Spoons"):
         st.warning("Spoons is locked. Admin can unlock in Setup.")
 
-    round_no = st.number_input("Round #", min_value=1, step=1, value=1, key="sp_round", disabled=is_event_locked("Spoons"))
-    order = st.multiselect("Elimination order (select all 9 in exact order)", players, default=[], key="sp_order",
-                           format_func=lambda x: display_player(x, name_map), disabled=is_event_locked("Spoons"))
-    if st.button("Save spoons round", disabled=is_event_locked("Spoons")):
-        if len(order) != len(players):
-            st.error("Select all 9 players in order.")
-        else:
-            insert_event_result("Spoons", int(round_no), {"round_no": int(round_no), "elimination_order": order})
-            st.success("Saved.")
-            st.rerun()
+        round_no = st.number_input(
+            "Round #", min_value=1, step=1, value=1, key="sp_round",
+            disabled=is_event_locked("Spoons")
+        )
 
+        with st.form("sp_round_form", clear_on_submit=True):
+            entered_by = st.selectbox(
+                "Entered by",
+                [""] + players,
+                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+                disabled=is_event_locked("Spoons"),
+            )
+
+            order = st.multiselect(
+                "Elimination order (select all 9 in exact order)",
+                players,
+                default=[],
+                key="sp_order",
+                format_func=lambda x: display_player(x, name_map),
+                disabled=is_event_locked("Spoons"),
+            )
+
+            if st.form_submit_button("Save spoons round", disabled=is_event_locked("Spoons")):
+                if len(order) != len(players):
+                    st.error("Select all 9 players in order.")
+                else:
+                    insert_event_result(
+                        "Spoons",
+                        int(round_no),
+                        {"round_no": int(round_no), "elimination_order": order, "entered_by": (entered_by if entered_by else None)},
+                    )
+                    st.success("Saved.")
+                    st.rerun()
     st.divider()
     sp_results = fetch_event_results("Spoons")
     if sp_results:
@@ -942,26 +1132,17 @@ with tabs[3]:
 
     st.markdown("### Current Spoons standings (raw)")
     sp_raw, sp_adj = compute_spoons_raw(players)
-    sp_cb = compute_spoons_countback(players)
-    sp_groups = build_tie_groups(players, sp_raw, [(sp_cb, True)])
-
+    sp_order = sort_with_tiebreakers(players, sp_raw, [], True)
     detail = []
-    place = 1
-    for grp in sp_groups:
-        for p in grp:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": sp_raw[p],
-                "1st_finishes": sp_cb[p][0],
-                "2nd_finishes": sp_cb[p][1],
-                "3rd_finishes": sp_cb[p][2],
-                "adjustment": sp_adj[p],
-            })
-        place += len(grp)
-
+    for i, p in enumerate(sp_order):
+        detail.append({
+            "rank": i+1,
+            "player": display_player(p, name_map),
+            "points": sp_raw[p],
+            "adjustment": sp_adj[p],
+        })
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → countback (more 1sts, then 2nds, …) → tie (no letter fallback).")
+    st.caption("Tie-breaker: points → letter.")
 
 # --- Secret Hitler ---
 with tabs[4]:
@@ -969,29 +1150,71 @@ with tabs[4]:
     if is_event_locked("Secret Hitler"):
         st.warning("Secret Hitler is locked. Admin can unlock in Setup.")
 
-    game_no = st.number_input("Game #", min_value=1, step=1, value=1, key="sh_game", disabled=is_event_locked("Secret Hitler"))
-    participants = st.multiselect("Participants", players, default=players, key="sh_part",
-                                 format_func=lambda x: display_player(x, name_map), disabled=is_event_locked("Secret Hitler"))
-    fascists = st.multiselect("Fascists (include Hitler)", participants, default=[], key="sh_fasc",
-                             format_func=lambda x: display_player(x, name_map), disabled=is_event_locked("Secret Hitler"))
-    hitler = st.selectbox("Hitler (must be in Fascists)", fascists if fascists else [""], key="sh_hitler", disabled=is_event_locked("Secret Hitler"))
-    winner_side = st.radio("Winner side", ["Liberals", "Fascists"], horizontal=True, key="sh_win_side", disabled=is_event_locked("Secret Hitler"))
-    spicy_type = st.selectbox("Spicy ending type", ["None", "Hitler elected", "Hitler killed"], key="sh_spicy_type", disabled=is_event_locked("Secret Hitler"))
-    if st.button("Save Secret Hitler game", disabled=is_event_locked("Secret Hitler")):
-        if not fascists or (hitler == "" or hitler not in fascists):
-            st.error("Select fascists and pick Hitler from that list.")
-        else:
-            insert_event_result("Secret Hitler", int(game_no), {
-                "game_no": int(game_no),
-                "participants": participants,
-                "fascists": fascists,
-                "hitler": hitler,
-                "winner_side": winner_side,
-                "spicy_type": spicy_type,
-            })
-            st.success("Saved.")
-            st.rerun()
+        game_no = st.number_input(
+            "Game #", min_value=1, step=1, value=1, key="sh_game",
+            disabled=is_event_locked("Secret Hitler")
+        )
 
+        with st.form("sh_game_form", clear_on_submit=True):
+            entered_by = st.selectbox(
+                "Entered by",
+                [""] + players,
+                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+                disabled=is_event_locked("Secret Hitler"),
+            )
+
+            fascists = st.multiselect(
+                "Fascists (include Hitler here)",
+                players,
+                default=[],
+                key="sh_fascists",
+                format_func=lambda x: display_player(x, name_map),
+                disabled=is_event_locked("Secret Hitler"),
+            )
+            liberals = [p for p in players if p not in fascists]
+            st.caption(f"Liberals inferred: {', '.join(display_player(p, name_map) for p in liberals) if liberals else '—'}")
+
+            hitler = st.selectbox(
+                "Hitler (must be in Fascists)",
+                [""] + fascists,
+                key="sh_hitler",
+                format_func=lambda x: "—" if x == "" else display_player(x, name_map),
+                disabled=is_event_locked("Secret Hitler"),
+            )
+
+            winner_side = st.radio(
+                "Winner side",
+                ["Liberals", "Fascists"],
+                horizontal=True,
+                key="sh_win_side",
+                disabled=is_event_locked("Secret Hitler"),
+            )
+
+            spicy_type = st.selectbox(
+                "Spicy ending type",
+                ["None", "Hitler killed", "Hitler elected"],
+                key="sh_spicy_type",
+                disabled=is_event_locked("Secret Hitler"),
+            )
+
+            if st.form_submit_button("Save Secret Hitler game", disabled=is_event_locked("Secret Hitler")):
+                if not fascists or (hitler == "" or hitler not in fascists):
+                    st.error("Select fascists and pick Hitler from that list.")
+                else:
+                    insert_event_result(
+                        "Secret Hitler",
+                        int(game_no),
+                        {
+                            "game_no": int(game_no),
+                            "fascists": fascists,
+                            "hitler": hitler,
+                            "winner_side": winner_side,
+                            "spicy_type": spicy_type,
+                            "entered_by": (entered_by if entered_by else None),
+                        },
+                    )
+                    st.success("Saved.")
+                    st.rerun()
     st.divider()
     sh_results = fetch_event_results("Secret Hitler")
     if sh_results:
@@ -1014,24 +1237,19 @@ with tabs[4]:
 
     st.markdown("### Current Secret Hitler standings (raw)")
     sh_raw, sh_wins, sh_spicy, sh_adj = compute_secret_hitler_raw(players)
-    sh_groups = build_tie_groups(players, sh_raw, [(sh_wins, True), (sh_spicy, True)])
-
+    sh_order = sort_with_tiebreakers(players, sh_raw, [(sh_wins, True), (sh_spicy, True)], True)
     detail = []
-    place = 1
-    for grp in sh_groups:
-        for p in grp:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": sh_raw[p],
-                "wins": sh_wins[p],
-                "spicy_wins": sh_spicy[p],
-                "adjustment": sh_adj[p],
-            })
-        place += len(grp)
-
+    for i, p in enumerate(sh_order):
+        detail.append({
+            "rank": i+1,
+            "player": display_player(p, name_map),
+            "points": sh_raw[p],
+            "wins": sh_wins[p],
+            "spicy_wins": sh_spicy[p],
+            "adjustment": sh_adj[p],
+        })
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → wins → spicy wins → tie (no letter fallback).")
+    st.caption("Tie-breakers: points → wins → spicy wins → letter.")
 
 # --- Breathalyzer ---
 with tabs[5]:
@@ -1039,26 +1257,72 @@ with tabs[5]:
     if is_event_locked("Breathalyzer"):
         st.warning("Breathalyzer is locked. Admin can unlock in Setup.")
 
-    sess = st.number_input("Session/Blow #", min_value=1, step=1, value=1, key="br_sess", disabled=is_event_locked("Breathalyzer"))
-    blower = st.selectbox("Blower", players, key="br_blower", format_func=lambda x: display_player(x, name_map),
-                          disabled=is_event_locked("Breathalyzer"))
-    actual = st.number_input("Actual BAC", min_value=0.0, step=0.001, value=0.000, format="%.3f", key="br_actual",
-                             disabled=is_event_locked("Breathalyzer"))
-    df = pd.DataFrame({"player": players, "guess": [""]*len(players)})
-    edited = st.data_editor(df, width="stretch", num_rows="fixed", key="br_editor", disabled=is_event_locked("Breathalyzer"))
-    if st.button("Save breathalyzer session", disabled=is_event_locked("Breathalyzer")):
-        guesses = {}
-        for _, row in edited.iterrows():
-            g = str(row["guess"]).strip()
-            if g and g.lower() != "nan":
-                guesses[row["player"]] = float(g)
-        if not guesses:
-            st.error("Enter at least one guess.")
-        else:
-            insert_event_result("Breathalyzer", int(sess), {"session_no": int(sess), "blower": blower, "actual": float(actual), "guesses": guesses})
-            st.success("Saved.")
-            st.rerun()
+        with st.form("br_sess_form", clear_on_submit=True):
+            entered_by = st.selectbox(
+                "Entered by",
+                [""] + players,
+                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+                disabled=is_event_locked("Breathalyzer"),
+            )
 
+            sess = st.number_input(
+                "Session/Blow #",
+                min_value=1,
+                step=1,
+                value=1,
+                key="br_sess",
+                disabled=is_event_locked("Breathalyzer"),
+            )
+            blower = st.selectbox(
+                "Blower",
+                players,
+                key="br_blower",
+                format_func=lambda x: display_player(x, name_map),
+                disabled=is_event_locked("Breathalyzer"),
+            )
+            actual = st.number_input(
+                "Actual BAC",
+                min_value=0.0,
+                step=0.001,
+                value=0.000,
+                format="%.3f",
+                key="br_actual",
+                disabled=is_event_locked("Breathalyzer"),
+            )
+
+            df = pd.DataFrame({"player": players, "guess": [""] * len(players)})
+            edited = st.data_editor(
+                df,
+                width="stretch",
+                num_rows="fixed",
+                key="br_editor",
+                disabled=is_event_locked("Breathalyzer"),
+            )
+
+            if st.form_submit_button("Save breathalyzer session", disabled=is_event_locked("Breathalyzer")):
+                guesses = {}
+                for _, row in edited.iterrows():
+                    g = str(row["guess"]).strip()
+                    if g == "" or g.lower() == "nan":
+                        continue
+                    try:
+                        guesses[row["player"]] = float(g)
+                    except Exception:
+                        pass
+
+                insert_event_result(
+                    "Breathalyzer",
+                    int(sess),
+                    {
+                        "sess": int(sess),
+                        "blower": blower,
+                        "actual": float(actual),
+                        "guesses": guesses,
+                        "entered_by": (entered_by if entered_by else None),
+                    },
+                )
+                st.success("Saved.")
+                st.rerun()
     st.divider()
     br_results = fetch_event_results("Breathalyzer")
     if br_results:
@@ -1076,28 +1340,36 @@ with tabs[5]:
 
     st.markdown("### Current Breathalyzer standings (raw)")
     br_raw, br_closest, br_avgerr, br_adj = compute_breathalyzer_raw(players)
-    br_groups = build_tie_groups(players, br_raw, [(br_closest, True), (br_avgerr, False)])
-
+    br_order = sort_with_tiebreakers(players, br_raw, [(br_closest, True), (br_avgerr, False)], True)
     detail = []
-    place = 1
-    for grp in br_groups:
-        for p in grp:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": br_raw[p],
-                "closest_count": br_closest[p],
-                "avg_error": (None if br_avgerr[p] == float("inf") else round(br_avgerr[p], 3)),
-                "adjustment": br_adj[p],
-            })
-        place += len(grp)
-
+    for i, p in enumerate(br_order):
+        detail.append({
+            "rank": i+1,
+            "player": display_player(p, name_map),
+            "points": br_raw[p],
+            "closest_count": br_closest[p],
+            "avg_error": (None if br_avgerr[p] == float("inf") else round(br_avgerr[p], 3)),
+            "adjustment": br_adj[p],
+        })
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → closest count → lower avg error → tie (no letter fallback).")
+    st.caption("Tie-breakers: points → closest count → lower avg error → letter.")
 
 # --- Standings ---
 with tabs[6]:
     st.subheader("Standings")
+
+    # Optional auto-refresh (polling). Only affects this view-only tab.
+    if st_autorefresh is not None:
+        c_a, c_b = st.columns([1, 1])
+        with c_a:
+            auto = st.checkbox("Auto-refresh", value=False, help="Re-check the database periodically so you see other devices' updates.")
+        with c_b:
+            interval_s = st.selectbox("Interval", [2, 5, 10, 15], index=1, disabled=not auto)
+        if auto:
+            st_autorefresh(interval=int(interval_s) * 1000, key="standings_autorefresh")
+    else:
+        st.caption("Auto-refresh unavailable (missing dependency).")
+
     computed = compute_all(players)
 
     totals = {p: 0 for p in players}

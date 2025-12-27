@@ -70,3 +70,9 @@ Added Spoons countback tie-breaker (more 1sts, then 2nds, etc.).
 
 ## v5.2
 Fixed tie-group UI functions and further Spoons countback logic.
+
+## v5.3
+- Halved beer pong games - Doubled scoring
+- Changed tables and inputs to be batch-submit forms - app no longer rewrites every time there's an input
+- Added auto-refresh toggle to Standings tab so other devices can see changes without full refreshing
+- Added "entered by" dropdown for user submit forms - track each score input
