@@ -79,3 +79,6 @@ Fixed tie-group UI functions and further Spoons countback logic.
 
 ## v5.3.1
 - fixed broken functions
+
+## v5.3.2
+- fixed broken reset function

@@ -275,8 +275,8 @@ def reset_tournament(clear_names: bool):
     db.execute("DELETE FROM beerpong_schedule")
     db.execute("DELETE FROM adjustments")
     # clear completion + locks
-    db.execute("DELETE FROM settings WHERE key LIKE 'event_completed::%'")
-    db.execute("DELETE FROM settings WHERE key LIKE 'event_locked::%'")
+    db.execute("DELETE FROM settings WHERE key LIKE 'event_completed::%%'")
+    db.execute("DELETE FROM settings WHERE key LIKE 'event_locked::%%'")
     if clear_names:
         db.execute("UPDATE players SET name=''")
 
