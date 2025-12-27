@@ -76,3 +76,6 @@ Fixed tie-group UI functions and further Spoons countback logic.
 - Changed tables and inputs to be batch-submit forms - app no longer rewrites every time there's an input
 - Added auto-refresh toggle to Standings tab so other devices can see changes without full refreshing
 - Added "entered by" dropdown for user submit forms - track each score input
+
+## v5.3.1
+- fixed broken functions

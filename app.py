@@ -714,9 +714,10 @@ def compute_all(players):
     tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
     tel_jj = jj_points_skipping_from_groups(tel_groups, len(players))
 
-    # Spoons: points only -> tie
+    # Spoons: points -> countback (more 1sts, then 2nds, ...) -> tie
     sp_raw, sp_adj = compute_spoons_raw(players)
-    sp_groups = build_tie_groups(players, sp_raw, [])
+    sp_cb = compute_spoons_countback(players)
+    sp_groups = build_tie_groups(players, sp_raw, [(sp_cb, True)])
     sp_jj = jj_points_skipping_from_groups(sp_groups, len(players))
 
     # Secret Hitler: points -> wins -> spicy wins -> tie
@@ -1054,7 +1055,7 @@ with tabs[2]:
         for p in group:
             detail.append({
                 "place": place,
-                "player": display_name(p),
+                "player": display_player(p, name_map),
                 "raw_points": tel_raw[p],
                 "booklet_wins": tel_bw[p],
                 "adjustment": tel_adj[p],
@@ -1132,17 +1133,26 @@ with tabs[3]:
 
     st.markdown("### Current Spoons standings (raw)")
     sp_raw, sp_adj = compute_spoons_raw(players)
-    sp_order = sort_with_tiebreakers(players, sp_raw, [], True)
+    sp_cb = compute_spoons_countback(players)
+    sp_groups = build_tie_groups(players, sp_raw, [(sp_cb, True)])
+
     detail = []
-    for i, p in enumerate(sp_order):
-        detail.append({
-            "rank": i+1,
-            "player": display_player(p, name_map),
-            "points": sp_raw[p],
-            "adjustment": sp_adj[p],
-        })
+    place = 1
+    for grp in sp_groups:
+        for p in grp:
+            detail.append({
+                "place": place,
+                "player": display_player(p, name_map),
+                "raw_points": sp_raw[p],
+                "1st_finishes": sp_cb[p][0],
+                "2nd_finishes": sp_cb[p][1],
+                "3rd_finishes": sp_cb[p][2],
+                "adjustment": sp_adj[p],
+            })
+        place += len(grp)
+
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breaker: points → letter.")
+    st.caption("Tie-breakers: points → countback (more 1sts, then 2nds, …) → tie (no letter fallback).")
 
 # --- Secret Hitler ---
 with tabs[4]:
@@ -1237,19 +1247,24 @@ with tabs[4]:
 
     st.markdown("### Current Secret Hitler standings (raw)")
     sh_raw, sh_wins, sh_spicy, sh_adj = compute_secret_hitler_raw(players)
-    sh_order = sort_with_tiebreakers(players, sh_raw, [(sh_wins, True), (sh_spicy, True)], True)
+    sh_groups = build_tie_groups(players, sh_raw, [(sh_wins, True), (sh_spicy, True)])
+
     detail = []
-    for i, p in enumerate(sh_order):
-        detail.append({
-            "rank": i+1,
-            "player": display_player(p, name_map),
-            "points": sh_raw[p],
-            "wins": sh_wins[p],
-            "spicy_wins": sh_spicy[p],
-            "adjustment": sh_adj[p],
-        })
+    place = 1
+    for grp in sh_groups:
+        for p in grp:
+            detail.append({
+                "place": place,
+                "player": display_player(p, name_map),
+                "raw_points": sh_raw[p],
+                "wins": sh_wins[p],
+                "spicy_wins": sh_spicy[p],
+                "adjustment": sh_adj[p],
+            })
+        place += len(grp)
+
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → wins → spicy wins → letter.")
+    st.caption("Tie-breakers: points → wins → spicy wins → tie (no letter fallback).")
 
 # --- Breathalyzer ---
 with tabs[5]:
@@ -1340,19 +1355,24 @@ with tabs[5]:
 
     st.markdown("### Current Breathalyzer standings (raw)")
     br_raw, br_closest, br_avgerr, br_adj = compute_breathalyzer_raw(players)
-    br_order = sort_with_tiebreakers(players, br_raw, [(br_closest, True), (br_avgerr, False)], True)
+    br_groups = build_tie_groups(players, br_raw, [(br_closest, True), (br_avgerr, False)])
+
     detail = []
-    for i, p in enumerate(br_order):
-        detail.append({
-            "rank": i+1,
-            "player": display_player(p, name_map),
-            "points": br_raw[p],
-            "closest_count": br_closest[p],
-            "avg_error": (None if br_avgerr[p] == float("inf") else round(br_avgerr[p], 3)),
-            "adjustment": br_adj[p],
-        })
+    place = 1
+    for grp in br_groups:
+        for p in grp:
+            detail.append({
+                "place": place,
+                "player": display_player(p, name_map),
+                "raw_points": br_raw[p],
+                "closest_count": br_closest[p],
+                "avg_error": (None if br_avgerr[p] == float("inf") else round(br_avgerr[p], 3)),
+                "adjustment": br_adj[p],
+            })
+        place += len(grp)
+
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → closest count → lower avg error → letter.")
+    st.caption("Tie-breakers: points → closest count → lower avg error → tie (no letter fallback).")
 
 # --- Standings ---
 with tabs[6]:
