@@ -67,3 +67,6 @@ JJ points now use skipped placements on ties; no letter fallback.
 
 ## v5.1
 Added Spoons countback tie-breaker (more 1sts, then 2nds, etc.).
+
+## v5.2
+Fixed tie-group UI functions and further Spoons countback logic.
