@@ -992,49 +992,50 @@ with tabs[1]:
 # --- Telestrations ---
 with tabs[2]:
     st.subheader("Telestrations")
-    if is_event_locked("Telestrations"):
+    locked = is_event_locked("Telestrations")
+    if locked:
         st.warning("Telestrations is locked. Admin can unlock in Setup.")
 
-        round_no = st.number_input(
-            "Round #", min_value=1, step=1, value=1, key="tel_round",
-            disabled=is_event_locked("Telestrations")
+    round_no = st.number_input(
+        "Round #", min_value=1, step=1, value=1, key="tel_round",
+        disabled=is_event_locked("Telestrations")
+    )
+
+    with st.form("tel_round_form", clear_on_submit=True):
+        entered_by = st.selectbox(
+            "Entered by",
+            [""] + players,
+            format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+            disabled=is_event_locked("Telestrations"),
         )
 
-        with st.form("tel_round_form", clear_on_submit=True):
-            entered_by = st.selectbox(
-                "Entered by",
-                [""] + players,
-                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
-                disabled=is_event_locked("Telestrations"),
-            )
+        winners = st.multiselect(
+            "Booklet winners (can be empty)",
+            players,
+            default=[],
+            key="tel_winners",
+            format_func=lambda x: display_player(x, name_map),
+            disabled=is_event_locked("Telestrations"),
+        )
 
-            winners = st.multiselect(
-                "Booklet winners (can be empty)",
-                players,
-                default=[],
-                key="tel_winners",
-                format_func=lambda x: display_player(x, name_map),
-                disabled=is_event_locked("Telestrations"),
-            )
+        df = pd.DataFrame({"player": players, "response_points": [0] * len(players)})
+        edited = st.data_editor(
+            df,
+            width="stretch",
+            num_rows="fixed",
+            key="tel_editor",
+            disabled=is_event_locked("Telestrations"),
+        )
 
-            df = pd.DataFrame({"player": players, "response_points": [0] * len(players)})
-            edited = st.data_editor(
-                df,
-                width="stretch",
-                num_rows="fixed",
-                key="tel_editor",
-                disabled=is_event_locked("Telestrations"),
+        if st.form_submit_button("Save telestrations round", disabled=is_event_locked("Telestrations")):
+            resp = {row["player"]: int(row["response_points"]) for _, row in edited.iterrows()}
+            insert_event_result(
+                "Telestrations",
+                int(round_no),
+                {"round_no": int(round_no), "booklet_winners": winners, "response_points": resp, "entered_by": (entered_by if entered_by else None)},
             )
-
-            if st.form_submit_button("Save telestrations round", disabled=is_event_locked("Telestrations")):
-                resp = {row["player"]: int(row["response_points"]) for _, row in edited.iterrows()}
-                insert_event_result(
-                    "Telestrations",
-                    int(round_no),
-                    {"round_no": int(round_no), "booklet_winners": winners, "response_points": resp, "entered_by": (entered_by if entered_by else None)},
-                )
-                st.success("Saved.")
-                st.rerun()
+            st.success("Saved.")
+            st.rerun()
     st.divider()
     tel_results = fetch_event_results("Telestrations")
     if tel_results:
@@ -1066,47 +1067,48 @@ with tabs[2]:
         place += len(group)
 
     st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → booklet wins → response points → letter.")
+    st.caption("Tie-breakers: points → booklet wins → tie (no letter fallback).")
 
 # --- Spoons ---
 with tabs[3]:
     st.subheader("Spoons")
-    if is_event_locked("Spoons"):
+    locked = is_event_locked("Spoons")
+    if locked:
         st.warning("Spoons is locked. Admin can unlock in Setup.")
 
-        round_no = st.number_input(
-            "Round #", min_value=1, step=1, value=1, key="sp_round",
-            disabled=is_event_locked("Spoons")
+    round_no = st.number_input(
+        "Round #", min_value=1, step=1, value=1, key="sp_round",
+        disabled=is_event_locked("Spoons")
+    )
+
+    with st.form("sp_round_form", clear_on_submit=True):
+        entered_by = st.selectbox(
+            "Entered by",
+            [""] + players,
+            format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+            disabled=is_event_locked("Spoons"),
         )
 
-        with st.form("sp_round_form", clear_on_submit=True):
-            entered_by = st.selectbox(
-                "Entered by",
-                [""] + players,
-                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
-                disabled=is_event_locked("Spoons"),
-            )
+        order = st.multiselect(
+            "Elimination order (select all 9 in exact order)",
+            players,
+            default=[],
+            key="sp_order",
+            format_func=lambda x: display_player(x, name_map),
+            disabled=is_event_locked("Spoons"),
+        )
 
-            order = st.multiselect(
-                "Elimination order (select all 9 in exact order)",
-                players,
-                default=[],
-                key="sp_order",
-                format_func=lambda x: display_player(x, name_map),
-                disabled=is_event_locked("Spoons"),
-            )
-
-            if st.form_submit_button("Save spoons round", disabled=is_event_locked("Spoons")):
-                if len(order) != len(players):
-                    st.error("Select all 9 players in order.")
-                else:
-                    insert_event_result(
-                        "Spoons",
-                        int(round_no),
-                        {"round_no": int(round_no), "elimination_order": order, "entered_by": (entered_by if entered_by else None)},
-                    )
-                    st.success("Saved.")
-                    st.rerun()
+        if st.form_submit_button("Save spoons round", disabled=is_event_locked("Spoons")):
+            if len(order) != len(players):
+                st.error("Select all 9 players in order.")
+            else:
+                insert_event_result(
+                    "Spoons",
+                    int(round_no),
+                    {"round_no": int(round_no), "elimination_order": order, "entered_by": (entered_by if entered_by else None)},
+                )
+                st.success("Saved.")
+                st.rerun()
     st.divider()
     sp_results = fetch_event_results("Spoons")
     if sp_results:
@@ -1160,74 +1162,75 @@ with tabs[3]:
 # --- Secret Hitler ---
 with tabs[4]:
     st.subheader("Secret Hitler")
-    if is_event_locked("Secret Hitler"):
+    locked = is_event_locked("Secret Hitler")
+    if locked:
         st.warning("Secret Hitler is locked. Admin can unlock in Setup.")
 
-        game_no = st.number_input(
-            "Game #", min_value=1, step=1, value=1, key="sh_game",
-            disabled=is_event_locked("Secret Hitler")
+    game_no = st.number_input(
+        "Game #", min_value=1, step=1, value=1, key="sh_game",
+        disabled=is_event_locked("Secret Hitler")
+    )
+
+    with st.form("sh_game_form", clear_on_submit=True):
+        entered_by = st.selectbox(
+            "Entered by",
+            [""] + players,
+            format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+            disabled=is_event_locked("Secret Hitler"),
         )
 
-        with st.form("sh_game_form", clear_on_submit=True):
-            entered_by = st.selectbox(
-                "Entered by",
-                [""] + players,
-                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
-                disabled=is_event_locked("Secret Hitler"),
-            )
+        fascists = st.multiselect(
+            "Fascists (include Hitler here)",
+            players,
+            default=[],
+            key="sh_fascists",
+            format_func=lambda x: display_player(x, name_map),
+            disabled=is_event_locked("Secret Hitler"),
+        )
+        liberals = [p for p in players if p not in fascists]
+        st.caption(f"Liberals inferred: {', '.join(display_player(p, name_map) for p in liberals) if liberals else '—'}")
 
-            fascists = st.multiselect(
-                "Fascists (include Hitler here)",
-                players,
-                default=[],
-                key="sh_fascists",
-                format_func=lambda x: display_player(x, name_map),
-                disabled=is_event_locked("Secret Hitler"),
-            )
-            liberals = [p for p in players if p not in fascists]
-            st.caption(f"Liberals inferred: {', '.join(display_player(p, name_map) for p in liberals) if liberals else '—'}")
+        hitler = st.selectbox(
+            "Hitler (must be in Fascists)",
+            [""] + fascists,
+            key="sh_hitler",
+            format_func=lambda x: "—" if x == "" else display_player(x, name_map),
+            disabled=is_event_locked("Secret Hitler"),
+        )
 
-            hitler = st.selectbox(
-                "Hitler (must be in Fascists)",
-                [""] + fascists,
-                key="sh_hitler",
-                format_func=lambda x: "—" if x == "" else display_player(x, name_map),
-                disabled=is_event_locked("Secret Hitler"),
-            )
+        winner_side = st.radio(
+            "Winner side",
+            ["Liberals", "Fascists"],
+            horizontal=True,
+            key="sh_win_side",
+            disabled=is_event_locked("Secret Hitler"),
+        )
 
-            winner_side = st.radio(
-                "Winner side",
-                ["Liberals", "Fascists"],
-                horizontal=True,
-                key="sh_win_side",
-                disabled=is_event_locked("Secret Hitler"),
-            )
+        spicy_type = st.selectbox(
+            "Spicy ending type",
+            ["None", "Hitler killed", "Hitler elected"],
+            key="sh_spicy_type",
+            disabled=is_event_locked("Secret Hitler"),
+        )
 
-            spicy_type = st.selectbox(
-                "Spicy ending type",
-                ["None", "Hitler killed", "Hitler elected"],
-                key="sh_spicy_type",
-                disabled=is_event_locked("Secret Hitler"),
-            )
-
-            if st.form_submit_button("Save Secret Hitler game", disabled=is_event_locked("Secret Hitler")):
-                if not fascists or (hitler == "" or hitler not in fascists):
-                    st.error("Select fascists and pick Hitler from that list.")
-                else:
-                    insert_event_result(
-                        "Secret Hitler",
-                        int(game_no),
-                        {
-                            "game_no": int(game_no),
-                            "fascists": fascists,
-                            "hitler": hitler,
-                            "winner_side": winner_side,
-                            "spicy_type": spicy_type,
-                            "entered_by": (entered_by if entered_by else None),
-                        },
-                    )
-                    st.success("Saved.")
-                    st.rerun()
+        if st.form_submit_button("Save Secret Hitler game", disabled=is_event_locked("Secret Hitler")):
+            if not fascists or (hitler == "" or hitler not in fascists):
+                st.error("Select fascists and pick Hitler from that list.")
+            else:
+                insert_event_result(
+                    "Secret Hitler",
+                    int(game_no),
+                    {
+                        "game_no": int(game_no),
+                        "fascists": fascists,
+                        "hitler": hitler,
+                        "winner_side": winner_side,
+                        "spicy_type": spicy_type,
+                        "entered_by": (entered_by if entered_by else None),
+                    },
+                )
+                st.success("Saved.")
+                st.rerun()
     st.divider()
     sh_results = fetch_event_results("Secret Hitler")
     if sh_results:
@@ -1272,75 +1275,76 @@ with tabs[4]:
 # --- Breathalyzer ---
 with tabs[5]:
     st.subheader("Breathalyzer")
-    if is_event_locked("Breathalyzer"):
+    locked = is_event_locked("Breathalyzer")
+    if locked:
         st.warning("Breathalyzer is locked. Admin can unlock in Setup.")
 
-        with st.form("br_sess_form", clear_on_submit=True):
-            entered_by = st.selectbox(
-                "Entered by",
-                [""] + players,
-                format_func=lambda p: "—" if p == "" else display_player(p, name_map),
-                disabled=is_event_locked("Breathalyzer"),
-            )
+    with st.form("br_sess_form", clear_on_submit=True):
+        entered_by = st.selectbox(
+            "Entered by",
+            [""] + players,
+            format_func=lambda p: "—" if p == "" else display_player(p, name_map),
+            disabled=is_event_locked("Breathalyzer"),
+        )
 
-            sess = st.number_input(
-                "Session/Blow #",
-                min_value=1,
-                step=1,
-                value=1,
-                key="br_sess",
-                disabled=is_event_locked("Breathalyzer"),
-            )
-            blower = st.selectbox(
-                "Blower",
-                players,
-                key="br_blower",
-                format_func=lambda x: display_player(x, name_map),
-                disabled=is_event_locked("Breathalyzer"),
-            )
-            actual = st.number_input(
-                "Actual BAC",
-                min_value=0.0,
-                step=0.001,
-                value=0.000,
-                format="%.3f",
-                key="br_actual",
-                disabled=is_event_locked("Breathalyzer"),
-            )
+        sess = st.number_input(
+            "Session/Blow #",
+            min_value=1,
+            step=1,
+            value=1,
+            key="br_sess",
+            disabled=is_event_locked("Breathalyzer"),
+        )
+        blower = st.selectbox(
+            "Blower",
+            players,
+            key="br_blower",
+            format_func=lambda x: display_player(x, name_map),
+            disabled=is_event_locked("Breathalyzer"),
+        )
+        actual = st.number_input(
+            "Actual BAC",
+            min_value=0.0,
+            step=0.001,
+            value=0.000,
+            format="%.3f",
+            key="br_actual",
+            disabled=is_event_locked("Breathalyzer"),
+        )
 
-            df = pd.DataFrame({"player": players, "guess": [""] * len(players)})
-            edited = st.data_editor(
-                df,
-                width="stretch",
-                num_rows="fixed",
-                key="br_editor",
-                disabled=is_event_locked("Breathalyzer"),
+        df = pd.DataFrame({"player": players, "guess": [""] * len(players)})
+        edited = st.data_editor(
+            df,
+            width="stretch",
+            num_rows="fixed",
+            key="br_editor",
+            disabled=is_event_locked("Breathalyzer"),
+        )
+
+        if st.form_submit_button("Save breathalyzer session", disabled=is_event_locked("Breathalyzer")):
+            guesses = {}
+            for _, row in edited.iterrows():
+                g = str(row["guess"]).strip()
+                if g == "" or g.lower() == "nan":
+                    continue
+                try:
+                    guesses[row["player"]] = float(g)
+                except Exception:
+                    pass
+
+            insert_event_result(
+                "Breathalyzer",
+                int(sess),
+                {
+                    "sess": int(sess),
+                    "blower": blower,
+                    "actual": float(actual),
+                    "guesses": guesses,
+                    "entered_by": (entered_by if entered_by else None),
+                },
             )
-
-            if st.form_submit_button("Save breathalyzer session", disabled=is_event_locked("Breathalyzer")):
-                guesses = {}
-                for _, row in edited.iterrows():
-                    g = str(row["guess"]).strip()
-                    if g == "" or g.lower() == "nan":
-                        continue
-                    try:
-                        guesses[row["player"]] = float(g)
-                    except Exception:
-                        pass
-
-                insert_event_result(
-                    "Breathalyzer",
-                    int(sess),
-                    {
-                        "sess": int(sess),
-                        "blower": blower,
-                        "actual": float(actual),
-                        "guesses": guesses,
-                        "entered_by": (entered_by if entered_by else None),
-                    },
-                )
-                st.success("Saved.")
-                st.rerun()
+            st.success("Saved.")
+            st.rerun()
     st.divider()
     br_results = fetch_event_results("Breathalyzer")
     if br_results:
