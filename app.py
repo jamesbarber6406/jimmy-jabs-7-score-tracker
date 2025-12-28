@@ -1286,8 +1286,8 @@ with tabs[4]:
                 st.success("Saved.")
                 st.rerun()
 
-st.divider()
-    sh_results = fetch_event_results("Secret Hitler")
+    st.divider()
+    sh_results = fetch_event_results(\"Secret Hitler\")
     if sh_results:
         st.markdown("### Logged games")
         rows = []
