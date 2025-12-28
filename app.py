@@ -1287,7 +1287,8 @@ with tabs[4]:
                 st.rerun()
 
     st.divider()
-    sh_results = fetch_event_results(\"Secret Hitler\")
+
+    sh_results = fetch_event_results("Secret Hitler")
     if sh_results:
         st.markdown("### Logged games")
         rows = []
@@ -1295,16 +1296,17 @@ with tabs[4]:
             pl = r["payload"]
             rows.append({
                 "id": r["id"],
-                "Game": pl["game_no"],
-                "Fascists": ", ".join([display_player(x, name_map) for x in pl["fascists"]]),
-                "Hitler": display_player(pl["hitler"], name_map),
-                "Winner": pl["winner_side"],
+                "Game": pl.get("game_no", ""),
+                "Fascists": ", ".join([display_player(x, name_map) for x in pl.get("fascists", [])]),
+                "Hitler": display_player(pl.get("hitler", ""), name_map),
+                "Winner": pl.get("winner_side", ""),
                 "Spicy": pl.get("spicy_type", "None"),
-                "Created": r["created_at"],
+                "Created": r.get("created_at", ""),
             })
         st.dataframe(pd.DataFrame(rows), width="stretch")
     else:
         st.info("No Secret Hitler games logged yet.")
+
 
     st.markdown("### Current Secret Hitler standings (raw)")
     sh_raw, sh_wins, sh_spicy, sh_adj = compute_secret_hitler_raw(players)
