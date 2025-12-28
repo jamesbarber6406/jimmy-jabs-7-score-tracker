@@ -88,24 +88,53 @@ class DB:
         return sql
 
     def execute(self, sql: str, params=None):
-        with self.connect() as conn:
-            cur = conn.cursor()
-            cur.execute(self._q(sql), params or [])
-            conn.commit()
+        tries = 2 if self.kind == "postgres" else 1
+        last_err = None
+        for _ in range(tries):
+            try:
+                with self.connect() as conn:
+                    cur = conn.cursor()
+                    cur.execute(self._q(sql), params or [])
+                    conn.commit()
+                return
+            except Exception as e:
+                # Postgres poolers can occasionally drop SSL connections; retry once.
+                last_err = e
+                if self.kind != "postgres" or e.__class__.__name__ not in ("OperationalError", "InterfaceError"):
+                    raise
+        raise last_err
 
     def fetchall(self, sql: str, params=None):
-        with self.connect() as conn:
-            cur = conn.cursor()
-            cur.execute(self._q(sql), params or [])
-            rows = cur.fetchall()
-        return rows
+        tries = 2 if self.kind == "postgres" else 1
+        last_err = None
+        for _ in range(tries):
+            try:
+                with self.connect() as conn:
+                    cur = conn.cursor()
+                    cur.execute(self._q(sql), params or [])
+                    rows = cur.fetchall()
+                return rows
+            except Exception as e:
+                last_err = e
+                if self.kind != "postgres" or e.__class__.__name__ not in ("OperationalError", "InterfaceError"):
+                    raise
+        raise last_err
 
     def fetchone(self, sql: str, params=None):
-        with self.connect() as conn:
-            cur = conn.cursor()
-            cur.execute(self._q(sql), params or [])
-            row = cur.fetchone()
-        return row
+        tries = 2 if self.kind == "postgres" else 1
+        last_err = None
+        for _ in range(tries):
+            try:
+                with self.connect() as conn:
+                    cur = conn.cursor()
+                    cur.execute(self._q(sql), params or [])
+                    row = cur.fetchone()
+                return row
+            except Exception as e:
+                last_err = e
+                if self.kind != "postgres" or e.__class__.__name__ not in ("OperationalError", "InterfaceError"):
+                    raise
+        raise last_err
 
 db = DB()
 
@@ -221,10 +250,17 @@ def insert_event_result(event: str, round_no: int, payload: dict):
     )
 
 def fetch_event_results(event: str):
-    rows = db.fetchall(
-        "SELECT id, round_no, payload_json, created_at FROM event_results WHERE event=? ORDER BY id ASC",
-        [event],
-    )
+    try:
+        rows = db.fetchall(
+            "SELECT id, round_no, payload_json, created_at FROM event_results WHERE event=? ORDER BY id ASC",
+            [event],
+        )
+    except Exception as e:
+        # Avoid hard-crashing the whole app on transient DB/network issues.
+        if e.__class__.__name__ in ("OperationalError", "InterfaceError"):
+            st.error(f"Database connection error while loading {event} results. Please retry / refresh. ({e})")
+            return []
+        raise
     out = []
     for rid, round_no, payload_json, created_at in rows:
         out.append({"id": rid, "round_no": round_no, "payload": json.loads(payload_json), "created_at": created_at})
@@ -622,8 +658,8 @@ def compute_secret_hitler_raw(players):
 
     for r in results:
         pl = r["payload"]
-        participants = pl["participants"]
-        fascists = pl["fascists"]
+        participants = pl.get("participants") or players
+        fascists = pl.get("fascists") or []
         liberals = [p for p in participants if p not in fascists]
         win_side = pl["winner_side"]
         spicy_type = pl.get("spicy_type", "None")
@@ -1024,13 +1060,22 @@ with tabs[2]:
             disabled=is_event_locked("Telestrations"),
         )
 
-        df = pd.DataFrame({"player": players, "response_points": [0] * len(players)})
+        df = pd.DataFrame({
+            "player": players,
+            "name": [display_player(p, name_map) for p in players],
+            "response_points": [0] * len(players),
+        })
         edited = st.data_editor(
             df,
             width="stretch",
             num_rows="fixed",
             key="tel_editor",
             disabled=is_event_locked("Telestrations"),
+            column_config={
+                "player": st.column_config.TextColumn("Player (letter)", disabled=True),
+                "name": st.column_config.TextColumn("Player", disabled=True),
+                "response_points": st.column_config.NumberColumn("Response points", min_value=0, step=1),
+            },
         )
 
         if st.form_submit_button("Save telestrations round", disabled=is_event_locked("Telestrations")):
@@ -1177,30 +1222,32 @@ with tabs[4]:
         disabled=is_event_locked("Secret Hitler")
     )
 
+
+    # Role selection (kept outside the form so the Hitler dropdown can react to fascist selection)
+    fascists = st.multiselect(
+        "Fascists (include Hitler here)",
+        players,
+        default=[],
+        key="sh_fascists",
+        format_func=lambda x: display_player(x, name_map),
+        disabled=is_event_locked("Secret Hitler"),
+    )
+    liberals = [p for p in players if p not in fascists]
+    st.caption(f"Liberals inferred: {', '.join(display_player(p, name_map) for p in liberals) if liberals else '—'}")
+
+    hitler = st.selectbox(
+        "Hitler (must be in Fascists)",
+        [""] + fascists,
+        key="sh_hitler",
+        format_func=lambda x: "—" if x == "" else display_player(x, name_map),
+        disabled=is_event_locked("Secret Hitler"),
+    )
+
     with st.form("sh_game_form", clear_on_submit=True):
         entered_by = st.selectbox(
             "Entered by",
             [""] + players,
             format_func=lambda p: "—" if p == "" else display_player(p, name_map),
-            disabled=is_event_locked("Secret Hitler"),
-        )
-
-        fascists = st.multiselect(
-            "Fascists (include Hitler here)",
-            players,
-            default=[],
-            key="sh_fascists",
-            format_func=lambda x: display_player(x, name_map),
-            disabled=is_event_locked("Secret Hitler"),
-        )
-        liberals = [p for p in players if p not in fascists]
-        st.caption(f"Liberals inferred: {', '.join(display_player(p, name_map) for p in liberals) if liberals else '—'}")
-
-        hitler = st.selectbox(
-            "Hitler (must be in Fascists)",
-            [""] + fascists,
-            key="sh_hitler",
-            format_func=lambda x: "—" if x == "" else display_player(x, name_map),
             disabled=is_event_locked("Secret Hitler"),
         )
 
@@ -1228,6 +1275,7 @@ with tabs[4]:
                     int(game_no),
                     {
                         "game_no": int(game_no),
+                        "participants": players,
                         "fascists": fascists,
                         "hitler": hitler,
                         "winner_side": winner_side,
@@ -1237,7 +1285,8 @@ with tabs[4]:
                 )
                 st.success("Saved.")
                 st.rerun()
-    st.divider()
+
+st.divider()
     sh_results = fetch_event_results("Secret Hitler")
     if sh_results:
         st.markdown("### Logged games")

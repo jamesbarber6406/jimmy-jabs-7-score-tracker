@@ -88,3 +88,8 @@ Fixed tie-group UI functions and further Spoons countback logic.
 
 ## v5.4
 - hotfix for session number issues with breathalyzer
+
+## v5.5
+- changed telestrations table to reflect name changes
+- fixed secret hitler hitler dropdown to update immediately as fascists chosen
+- added retry for postgres so app streamlit error won't crash entire app
