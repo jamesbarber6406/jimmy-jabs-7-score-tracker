@@ -7,10 +7,16 @@ except Exception:
     st_autorefresh = None
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import random
 from contextlib import contextmanager
+
+
+
+def now_utc_iso() -> str:
+    """Return an ISO-8601 timestamp in UTC (timezone-aware)."""
+    return datetime.now(timezone.utc).isoformat()
 
 APP_TITLE = "Jimmy Jabs (Tournament Tracker)"
 DEFAULT_PLAYERS = list("ABCDEFGHI")
@@ -211,7 +217,7 @@ def is_event_locked(event: str) -> bool:
 def insert_event_result(event: str, round_no: int, payload: dict):
     db.execute(
         "INSERT INTO event_results(event, round_no, payload_json, created_at) VALUES(?, ?, ?, ?)",
-        [event, int(round_no), json.dumps(payload), datetime.utcnow().isoformat()]
+        [event, int(round_no), json.dumps(payload), now_utc_iso()]
     )
 
 def fetch_event_results(event: str):
@@ -247,7 +253,7 @@ def get_players_df():
 def add_adjustment(event: str, player: str, delta: int, note: str):
     db.execute(
         "INSERT INTO adjustments(event, player, delta, note, created_at) VALUES(?, ?, ?, ?, ?)",
-        [event, player, int(delta), note, datetime.utcnow().isoformat()]
+        [event, player, int(delta), note, now_utc_iso()]
     )
 
 def list_adjustments(event: str | None = None):
@@ -1336,7 +1342,9 @@ with tabs[5]:
                 "Breathalyzer",
                 int(sess),
                 {
-                    "sess": int(sess),
+                    "session_no": int(sess),
+                    "sess": int(sess),  # backward-compat
+
                     "blower": blower,
                     "actual": float(actual),
                     "guesses": guesses,
@@ -1350,7 +1358,7 @@ with tabs[5]:
     if br_results:
         st.markdown("### Logged sessions")
         st.dataframe(pd.DataFrame([
-            {"id": r["id"], "Session": r["payload"]["session_no"],
+            {"id": r["id"], "Session": r["payload"].get("session_no", r["payload"].get("sess", r.get("round_no"))),
              "Blower": display_player(r["payload"]["blower"], name_map),
              "Actual": r["payload"]["actual"],
              "Guesses": len(r["payload"]["guesses"]),

@@ -85,3 +85,6 @@ Fixed tie-group UI functions and further Spoons countback logic.
 
 ## v5.3.3
 - fixed issues with bye rounds for beer pong
+
+## v5.4
+- hotfix for session number issues with breathalyzer
