@@ -93,3 +93,6 @@ Fixed tie-group UI functions and further Spoons countback logic.
 - changed telestrations table to reflect name changes
 - fixed secret hitler hitler dropdown to update immediately as fascists chosen
 - added retry for postgres so app streamlit error won't crash entire app
+
+## Edited Requirements
+- Added auto refresh for streamlit - was already in code but not in requirements
