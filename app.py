@@ -892,9 +892,17 @@ init_db()
 seed_default_players()
 
 def refresh_players():
+    # Full roster from DB (used for Setup editor)
     pdf = get_players_df()
-    p_list = pdf["letter"].tolist()
+
+    # Name map for display (includes blank names)
     nmap = {row["letter"]: row["name"] for _, row in pdf.iterrows()}
+
+    # Active players = rows with a non-empty name
+    # This lets you keep extra rows in the DB (e.g., legacy 9-player row) without affecting scheduling/scoring.
+    active_mask = pdf["name"].astype(str).str.strip() != ""
+    p_list = pdf.loc[active_mask, "letter"].tolist()
+
     return pdf, p_list, nmap
 
 players_df, players, name_map = refresh_players()
