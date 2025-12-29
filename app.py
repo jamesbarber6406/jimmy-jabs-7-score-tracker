@@ -386,33 +386,52 @@ def jj_points_skipping_from_groups(groups, n_players):
 # Beer Pong schedule generator (equal games)
 # ----------------------------
 def score_schedule(rounds_payload, players):
+    """Score a Beer Pong schedule.
+
+    Lower is better. Penalizes repeated teammates/opponents and uneven game counts.
+    Byes are optional (used in the 9-player format); for 8 players schedules should have no byes.
+    """
     teammate = {p: {q: 0 for q in players} for p in players}
     opponent = {p: {q: 0 for q in players} for p in players}
     games = {p: 0 for p in players}
     byes = {p: 0 for p in players}
 
     for r in rounds_payload:
-        byes[r["bye"]] += 1
-        for m in r["matches"]:
-            a = m["team_a"]
-            b = m["team_b"]
+        bye = r.get("bye")
+        if bye is not None and bye in byes:
+            byes[bye] += 1
+
+        for mm in (r.get("matches") or []):
+            if not mm:
+                continue
+            a = mm["team_a"]
+            b = mm["team_b"]
             for p in a + b:
                 games[p] += 1
+
+            # teammates
             teammate[a[0]][a[1]] += 1
             teammate[a[1]][a[0]] += 1
             teammate[b[0]][b[1]] += 1
             teammate[b[1]][b[0]] += 1
+
+            # opponents
             for p in a:
                 for q in b:
                     opponent[p][q] += 1
                     opponent[q][p] += 1
 
     rep_team_pen = 0
+    for p in players:
+        for q in players:
+            if p == q:
+                continue
+            c = teammate[p][q]
+            rep_team_pen += (c - 1) * 5 if c > 1 else 0
+
     rep_opp_pen = 0
     for i, p in enumerate(players):
         for q in players[i+1:]:
-            c = teammate[p][q]
-            rep_team_pen += (c - 1) * 12 if c > 1 else (2 if c == 1 else 0)
             c2 = opponent[p][q]
             rep_opp_pen += (c2 - 2) * 4 if c2 > 2 else (1 if c2 == 2 else 0)
 
@@ -422,7 +441,7 @@ def score_schedule(rounds_payload, players):
 
     bp = list(byes.values())
     mean_bp = sum(bp) / len(bp)
-    var_bp = sum((x - mean_bp) ** 2 for x in bp) / len(bp)
+    var_bp = sum((x - mean_bp) ** 2 for x in bp) / len(bp) if bp else 0
 
     return rep_team_pen + rep_opp_pen + (var_gp * 10) + (var_bp * 10)
 
@@ -544,7 +563,7 @@ def generate_equal_beerpong_schedule(players, rounds=5, games_per_player=4, trie
     # Build stored schedule format expected by UI: each round has 2 match slots; if missing, use None.
     schedule = []
     for i, matches in enumerate(rounds_list, start=1):
-        entry = {"round_no": i, "matches": []}
+        entry = {"round_no": i, "bye": None, "matches": []}
         for mm in matches:
             a1,a2,b1,b2 = mm
             entry["matches"].append({"team_a": [a1,a2], "team_b": [b1,b2]})
@@ -875,7 +894,9 @@ with tabs[1]:
 
     c1, c2 = st.columns([1, 1])
     with c1:
-        st.write("Rounds: 5 (target: everyone plays 4 games; total 9 matches)")
+        bp_rounds = 4 if len(players) == 8 else 5
+        bp_total_matches = len(players)  # with games_per_player=4 this equals total matches
+        st.write(f"Rounds: {bp_rounds} (target: everyone plays 4 games; total {bp_total_matches} matches)")
         seed = st.number_input(
             "Schedule seed",
             min_value=1,
@@ -892,12 +913,12 @@ with tabs[1]:
         )
         if st.button("Generate schedule", disabled=is_event_locked("Beer Pong")):
             best, best_score = generate_equal_beerpong_schedule(
-                players, rounds=5, games_per_player=4, tries=int(tries), seed=int(seed)
+                players, rounds=bp_rounds, games_per_player=4, tries=int(tries), seed=int(seed)
             )
             clear_schedule()
             for r in best:
                 store_schedule(r["round_no"], r)
-            upsert_setting("beerpong_rounds", "5")
+            upsert_setting("beerpong_rounds", str(bp_rounds))
             upsert_setting("beerpong_seed", str(int(seed)))
             upsert_setting("beerpong_tries", str(int(tries)))
             st.success(f"Generated. Score (lower better): {best_score:.2f}")
@@ -1150,8 +1171,9 @@ with tabs[3]:
             disabled=is_event_locked("Spoons"),
         )
 
+        n_players = len(players)
         order = st.multiselect(
-            "Elimination order (select all 9 in exact order)",
+            f"Elimination order (select all {n_players} in exact order)",
             players,
             default=[],
             key="sp_order",
@@ -1161,7 +1183,7 @@ with tabs[3]:
 
         if st.form_submit_button("Save spoons round", disabled=is_event_locked("Spoons")):
             if len(order) != len(players):
-                st.error("Select all 9 players in order.")
+                st.error(f"Select all {len(players)} players in order.")
             else:
                 insert_event_result(
                     "Spoons",
@@ -1182,20 +1204,21 @@ with tabs[3]:
                 elim = r["payload"]["elimination_order"]
                 # placements: last out is 1st place
                 placement = list(reversed(elim))
-                rows.append({
-                    "id": r["id"],
-                    "Round": r["round_no"],
-                    "1st": display_player(placement[0], name_map),
-                    "2nd": display_player(placement[1], name_map),
-                    "3rd": display_player(placement[2], name_map),
-                    "4th": display_player(placement[3], name_map),
-                    "5th": display_player(placement[4], name_map),
-                    "6th": display_player(placement[5], name_map),
-                    "7th": display_player(placement[6], name_map),
-                    "8th": display_player(placement[7], name_map),
-                    "9th": display_player(placement[8], name_map),
-                    "Created": r["created_at"],
-                })
+                row = {"id": r["id"], "Round": r["round_no"]}
+
+                def place_label(i: int) -> str:
+                    # 1st/2nd/3rd with correct teens handling
+                    if 10 <= (i % 100) <= 20:
+                        suf = "th"
+                    else:
+                        suf = {1: "st", 2: "nd", 3: "rd"}.get(i % 10, "th")
+                    return f"{i}{suf}"
+
+                for i, pp in enumerate(placement, start=1):
+                    row[place_label(i)] = display_player(pp, name_map)
+
+                row["Created"] = r["created_at"]
+                rows.append(row)
             st.dataframe(pd.DataFrame(rows), width="stretch")
         else:
             st.info("No spoons rounds logged yet.")
