@@ -96,3 +96,7 @@ Fixed tie-group UI functions and further Spoons countback logic.
 
 ## Edited Requirements
 - Added auto refresh for streamlit - was already in code but not in requirements
+
+## v6
+- One person dropped out of tournament
+- Changed player count to 8

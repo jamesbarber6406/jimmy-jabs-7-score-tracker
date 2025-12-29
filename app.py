@@ -19,7 +19,7 @@ def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 APP_TITLE = "Jimmy Jabs (Tournament Tracker)"
-DEFAULT_PLAYERS = list("ABCDEFGHI")
+DEFAULT_PLAYERS = list("ABCDEFGH")
 
 EVENTS = ["Beer Pong", "Telestrations", "Spoons", "Secret Hitler", "Breathalyzer"]
 
@@ -979,58 +979,63 @@ with tabs[1]:
                     st.success("Saved.")
                     st.rerun()
     st.divider()
-    st.markdown("### Logged matches")
-    bp_results = fetch_event_results("Beer Pong")
-    if bp_results:
-        rows = []
-        for rr in bp_results:
+
+    @st.fragment(run_every=10)
+    def _bp_live():
+        st.markdown("### Logged matches")
+        bp_results = fetch_event_results("Beer Pong")
+        if bp_results:
+            rows = []
+            for rr in bp_results:
+                pl = rr["payload"]
+                rows.append({
+                    "id": rr["id"],
+                    "Round": rr["round_no"],
+                    "Match": pl["match_idx"],
+                    "Team A": str(display_team(pl["team_a"], name_map)),
+                    "Team B": str(display_team(pl["team_b"], name_map)),
+                    "Winner": pl["winner"],
+                    "A sunk": 6 - int(pl.get("cups_remaining_a", 0)),
+                    "B sunk": 6 - int(pl.get("cups_remaining_b", 0)),
+                    "CloseLoss": pl.get("close_loss", False),
+                    "Created": rr["created_at"],
+                })
+            st.dataframe(pd.DataFrame(rows), width="stretch")
+        else:
+            st.info("No Beer Pong matches logged yet.")
+
+        st.markdown("### Current Beer Pong standings (raw)")
+        bp_raw, bp_wins, bp_games, bp_cups, bp_adj = compute_beerpong_raw(players)
+        bp_results2 = fetch_event_results("Beer Pong")
+        bp_rem = {p: 0 for p in players}
+        for rr in bp_results2:
             pl = rr["payload"]
-            rows.append({
-                "id": rr["id"],
-                "Round": rr["round_no"],
-                "Match": pl["match_idx"],
-                "Team A": str(display_team(pl["team_a"], name_map)),
-                "Team B": str(display_team(pl["team_b"], name_map)),
-                "Winner": pl["winner"],
-                "A sunk": 6 - int(pl.get("cups_remaining_a", 0)),
-                "B sunk": 6 - int(pl.get("cups_remaining_b", 0)),
-                "CloseLoss": pl.get("close_loss", False),
-                "Created": rr["created_at"],
+            a_rem = int(pl.get("cups_remaining_a", 0))
+            b_rem = int(pl.get("cups_remaining_b", 0))
+            for p in pl["team_a"]:
+                bp_rem[p] += a_rem
+            for p in pl["team_b"]:
+                bp_rem[p] += b_rem
+        bp_groups = build_tie_groups(players, bp_raw, [(bp_wins, True), (bp_cups, True), (bp_rem, True)])
+        bp_order = [p for grp in bp_groups for p in grp]
+        detail = []
+        for i, p in enumerate(bp_order):
+            detail.append({
+                "rank": i+1,
+                "player": display_player(p, name_map),
+                "points": bp_raw[p],
+                "wins": bp_wins[p],
+                "cups_sunk": bp_cups[p],
+                "cups_remaining_total": bp_rem[p],
+                "wins": bp_wins[p],
+                "games": bp_games[p],
+                "adjustment": bp_adj[p],
             })
-        st.dataframe(pd.DataFrame(rows), width="stretch")
-    else:
-        st.info("No Beer Pong matches logged yet.")
+        st.dataframe(pd.DataFrame(detail), width="stretch")
+        st.caption("Tie-breakers: points → wins → cups sunk → cups remaining total → tie (no letter fallback).")
 
-    st.markdown("### Current Beer Pong standings (raw)")
-    bp_raw, bp_wins, bp_games, bp_cups, bp_adj = compute_beerpong_raw(players)
-    bp_results2 = fetch_event_results("Beer Pong")
-    bp_rem = {p: 0 for p in players}
-    for rr in bp_results2:
-        pl = rr["payload"]
-        a_rem = int(pl.get("cups_remaining_a", 0))
-        b_rem = int(pl.get("cups_remaining_b", 0))
-        for p in pl["team_a"]:
-            bp_rem[p] += a_rem
-        for p in pl["team_b"]:
-            bp_rem[p] += b_rem
-    bp_groups = build_tie_groups(players, bp_raw, [(bp_wins, True), (bp_cups, True), (bp_rem, True)])
-    bp_order = [p for grp in bp_groups for p in grp]
-    detail = []
-    for i, p in enumerate(bp_order):
-        detail.append({
-            "rank": i+1,
-            "player": display_player(p, name_map),
-            "points": bp_raw[p],
-            "wins": bp_wins[p],
-            "cups_sunk": bp_cups[p],
-            "cups_remaining_total": bp_rem[p],
-            "wins": bp_wins[p],
-            "games": bp_games[p],
-            "adjustment": bp_adj[p],
-        })
-    st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → wins → cups sunk → cups remaining total → tie (no letter fallback).")
 
+    _bp_live()
 # --- Telestrations ---
 with tabs[2]:
     st.subheader("Telestrations")
@@ -1088,38 +1093,43 @@ with tabs[2]:
             st.success("Saved.")
             st.rerun()
     st.divider()
-    tel_results = fetch_event_results("Telestrations")
-    if tel_results:
-        st.markdown("### Logged rounds")
-        st.dataframe(pd.DataFrame([
-            {"id": r["id"], "Round": r["round_no"],
-             "Booklet winners": ", ".join([display_player(w, name_map) for w in r["payload"].get("booklet_winners", [])]) or "(none)",
-             "Created": r["created_at"]}
-            for r in tel_results
-        ]), width="stretch")
-    else:
-        st.info("No telestrations rounds logged yet.")
 
-    st.markdown("### Current Telestrations standings (raw)")
-    tel_raw, tel_bw, tel_rp, tel_adj = compute_telestrations_raw(players)
-    tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
+    @st.fragment(run_every=12)
+    def _tel_live():
+        tel_results = fetch_event_results("Telestrations")
+        if tel_results:
+            st.markdown("### Logged rounds")
+            st.dataframe(pd.DataFrame([
+                {"id": r["id"], "Round": r["round_no"],
+                 "Booklet winners": ", ".join([display_player(w, name_map) for w in r["payload"].get("booklet_winners", [])]) or "(none)",
+                 "Created": r["created_at"]}
+                for r in tel_results
+            ]), width="stretch")
+        else:
+            st.info("No telestrations rounds logged yet.")
 
-    detail = []
-    place = 1
-    for group in tel_groups:
-        for p in group:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": tel_raw[p],
-                "booklet_wins": tel_bw[p],
-                "adjustment": tel_adj[p],
-            })
-        place += len(group)
+        st.markdown("### Current Telestrations standings (raw)")
+        tel_raw, tel_bw, tel_rp, tel_adj = compute_telestrations_raw(players)
+        tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
 
-    st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → booklet wins → tie (no letter fallback).")
+        detail = []
+        place = 1
+        for group in tel_groups:
+            for p in group:
+                detail.append({
+                    "place": place,
+                    "player": display_player(p, name_map),
+                    "raw_points": tel_raw[p],
+                    "booklet_wins": tel_bw[p],
+                    "adjustment": tel_adj[p],
+                })
+            place += len(group)
 
+        st.dataframe(pd.DataFrame(detail), width="stretch")
+        st.caption("Tie-breakers: points → booklet wins → tie (no letter fallback).")
+
+
+    _tel_live()
 # --- Spoons ---
 with tabs[3]:
     st.subheader("Spoons")
@@ -1161,55 +1171,60 @@ with tabs[3]:
                 st.success("Saved.")
                 st.rerun()
     st.divider()
-    sp_results = fetch_event_results("Spoons")
-    if sp_results:
-        st.markdown("### Logged rounds + placements")
-        rows = []
-        for r in sp_results:
-            elim = r["payload"]["elimination_order"]
-            # placements: last out is 1st place
-            placement = list(reversed(elim))
-            rows.append({
-                "id": r["id"],
-                "Round": r["round_no"],
-                "1st": display_player(placement[0], name_map),
-                "2nd": display_player(placement[1], name_map),
-                "3rd": display_player(placement[2], name_map),
-                "4th": display_player(placement[3], name_map),
-                "5th": display_player(placement[4], name_map),
-                "6th": display_player(placement[5], name_map),
-                "7th": display_player(placement[6], name_map),
-                "8th": display_player(placement[7], name_map),
-                "9th": display_player(placement[8], name_map),
-                "Created": r["created_at"],
-            })
-        st.dataframe(pd.DataFrame(rows), width="stretch")
-    else:
-        st.info("No spoons rounds logged yet.")
 
-    st.markdown("### Current Spoons standings (raw)")
-    sp_raw, sp_adj = compute_spoons_raw(players)
-    sp_cb = compute_spoons_countback(players)
-    sp_groups = build_tie_groups(players, sp_raw, [(sp_cb, True)])
+    @st.fragment(run_every=12)
+    def _sp_live():
+        sp_results = fetch_event_results("Spoons")
+        if sp_results:
+            st.markdown("### Logged rounds + placements")
+            rows = []
+            for r in sp_results:
+                elim = r["payload"]["elimination_order"]
+                # placements: last out is 1st place
+                placement = list(reversed(elim))
+                rows.append({
+                    "id": r["id"],
+                    "Round": r["round_no"],
+                    "1st": display_player(placement[0], name_map),
+                    "2nd": display_player(placement[1], name_map),
+                    "3rd": display_player(placement[2], name_map),
+                    "4th": display_player(placement[3], name_map),
+                    "5th": display_player(placement[4], name_map),
+                    "6th": display_player(placement[5], name_map),
+                    "7th": display_player(placement[6], name_map),
+                    "8th": display_player(placement[7], name_map),
+                    "9th": display_player(placement[8], name_map),
+                    "Created": r["created_at"],
+                })
+            st.dataframe(pd.DataFrame(rows), width="stretch")
+        else:
+            st.info("No spoons rounds logged yet.")
 
-    detail = []
-    place = 1
-    for grp in sp_groups:
-        for p in grp:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": sp_raw[p],
-                "1st_finishes": sp_cb[p][0],
-                "2nd_finishes": sp_cb[p][1],
-                "3rd_finishes": sp_cb[p][2],
-                "adjustment": sp_adj[p],
-            })
-        place += len(grp)
+        st.markdown("### Current Spoons standings (raw)")
+        sp_raw, sp_adj = compute_spoons_raw(players)
+        sp_cb = compute_spoons_countback(players)
+        sp_groups = build_tie_groups(players, sp_raw, [(sp_cb, True)])
 
-    st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → countback (more 1sts, then 2nds, …) → tie (no letter fallback).")
+        detail = []
+        place = 1
+        for grp in sp_groups:
+            for p in grp:
+                detail.append({
+                    "place": place,
+                    "player": display_player(p, name_map),
+                    "raw_points": sp_raw[p],
+                    "1st_finishes": sp_cb[p][0],
+                    "2nd_finishes": sp_cb[p][1],
+                    "3rd_finishes": sp_cb[p][2],
+                    "adjustment": sp_adj[p],
+                })
+            place += len(grp)
 
+        st.dataframe(pd.DataFrame(detail), width="stretch")
+        st.caption("Tie-breakers: points → countback (more 1sts, then 2nds, …) → tie (no letter fallback).")
+
+
+    _sp_live()
 # --- Secret Hitler ---
 with tabs[4]:
     st.subheader("Secret Hitler")
@@ -1288,47 +1303,52 @@ with tabs[4]:
 
     st.divider()
 
-    sh_results = fetch_event_results("Secret Hitler")
-    if sh_results:
-        st.markdown("### Logged games")
-        rows = []
-        for r in sh_results:
-            pl = r["payload"]
-            rows.append({
-                "id": r["id"],
-                "Game": pl.get("game_no", ""),
-                "Fascists": ", ".join([display_player(x, name_map) for x in pl.get("fascists", [])]),
-                "Hitler": display_player(pl.get("hitler", ""), name_map),
-                "Winner": pl.get("winner_side", ""),
-                "Spicy": pl.get("spicy_type", "None"),
-                "Created": r.get("created_at", ""),
-            })
-        st.dataframe(pd.DataFrame(rows), width="stretch")
-    else:
-        st.info("No Secret Hitler games logged yet.")
+    @st.fragment(run_every=12)
+    def _sh_live():
+
+        sh_results = fetch_event_results("Secret Hitler")
+        if sh_results:
+            st.markdown("### Logged games")
+            rows = []
+            for r in sh_results:
+                pl = r["payload"]
+                rows.append({
+                    "id": r["id"],
+                    "Game": pl.get("game_no", ""),
+                    "Fascists": ", ".join([display_player(x, name_map) for x in pl.get("fascists", [])]),
+                    "Hitler": display_player(pl.get("hitler", ""), name_map),
+                    "Winner": pl.get("winner_side", ""),
+                    "Spicy": pl.get("spicy_type", "None"),
+                    "Created": r.get("created_at", ""),
+                })
+            st.dataframe(pd.DataFrame(rows), width="stretch")
+        else:
+            st.info("No Secret Hitler games logged yet.")
 
 
-    st.markdown("### Current Secret Hitler standings (raw)")
-    sh_raw, sh_wins, sh_spicy, sh_adj = compute_secret_hitler_raw(players)
-    sh_groups = build_tie_groups(players, sh_raw, [(sh_wins, True), (sh_spicy, True)])
+        st.markdown("### Current Secret Hitler standings (raw)")
+        sh_raw, sh_wins, sh_spicy, sh_adj = compute_secret_hitler_raw(players)
+        sh_groups = build_tie_groups(players, sh_raw, [(sh_wins, True), (sh_spicy, True)])
 
-    detail = []
-    place = 1
-    for grp in sh_groups:
-        for p in grp:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": sh_raw[p],
-                "wins": sh_wins[p],
-                "spicy_wins": sh_spicy[p],
-                "adjustment": sh_adj[p],
-            })
-        place += len(grp)
+        detail = []
+        place = 1
+        for grp in sh_groups:
+            for p in grp:
+                detail.append({
+                    "place": place,
+                    "player": display_player(p, name_map),
+                    "raw_points": sh_raw[p],
+                    "wins": sh_wins[p],
+                    "spicy_wins": sh_spicy[p],
+                    "adjustment": sh_adj[p],
+                })
+            place += len(grp)
 
-    st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → wins → spicy wins → tie (no letter fallback).")
+        st.dataframe(pd.DataFrame(detail), width="stretch")
+        st.caption("Tie-breakers: points → wins → spicy wins → tie (no letter fallback).")
 
+
+    _sh_live()
 # --- Breathalyzer ---
 with tabs[5]:
     st.subheader("Breathalyzer")
@@ -1405,88 +1425,86 @@ with tabs[5]:
             st.success("Saved.")
             st.rerun()
     st.divider()
-    br_results = fetch_event_results("Breathalyzer")
-    if br_results:
-        st.markdown("### Logged sessions")
-        st.dataframe(pd.DataFrame([
-            {"id": r["id"], "Session": r["payload"].get("session_no", r["payload"].get("sess", r.get("round_no"))),
-             "Blower": display_player(r["payload"]["blower"], name_map),
-             "Actual": r["payload"]["actual"],
-             "Guesses": len(r["payload"]["guesses"]),
-             "Created": r["created_at"]}
-            for r in br_results
-        ]), width="stretch")
-    else:
-        st.info("No breathalyzer sessions logged yet.")
 
-    st.markdown("### Current Breathalyzer standings (raw)")
-    br_raw, br_closest, br_avgerr, br_adj = compute_breathalyzer_raw(players)
-    br_groups = build_tie_groups(players, br_raw, [(br_closest, True), (br_avgerr, False)])
+    @st.fragment(run_every=12)
+    def _br_live():
+        br_results = fetch_event_results("Breathalyzer")
+        if br_results:
+            st.markdown("### Logged sessions")
+            st.dataframe(pd.DataFrame([
+                {"id": r["id"], "Session": r["payload"].get("session_no", r["payload"].get("sess", r.get("round_no"))),
+                 "Blower": display_player(r["payload"]["blower"], name_map),
+                 "Actual": r["payload"]["actual"],
+                 "Guesses": len(r["payload"]["guesses"]),
+                 "Created": r["created_at"]}
+                for r in br_results
+            ]), width="stretch")
+        else:
+            st.info("No breathalyzer sessions logged yet.")
 
-    detail = []
-    place = 1
-    for grp in br_groups:
-        for p in grp:
-            detail.append({
-                "place": place,
-                "player": display_player(p, name_map),
-                "raw_points": br_raw[p],
-                "closest_count": br_closest[p],
-                "avg_error": (None if br_avgerr[p] == float("inf") else round(br_avgerr[p], 3)),
-                "adjustment": br_adj[p],
-            })
-        place += len(grp)
+        st.markdown("### Current Breathalyzer standings (raw)")
+        br_raw, br_closest, br_avgerr, br_adj = compute_breathalyzer_raw(players)
+        br_groups = build_tie_groups(players, br_raw, [(br_closest, True), (br_avgerr, False)])
 
-    st.dataframe(pd.DataFrame(detail), width="stretch")
-    st.caption("Tie-breakers: points → closest count → lower avg error → tie (no letter fallback).")
+        detail = []
+        place = 1
+        for grp in br_groups:
+            for p in grp:
+                detail.append({
+                    "place": place,
+                    "player": display_player(p, name_map),
+                    "raw_points": br_raw[p],
+                    "closest_count": br_closest[p],
+                    "avg_error": (None if br_avgerr[p] == float("inf") else round(br_avgerr[p], 3)),
+                    "adjustment": br_adj[p],
+                })
+            place += len(grp)
 
+        st.dataframe(pd.DataFrame(detail), width="stretch")
+        st.caption("Tie-breakers: points → closest count → lower avg error → tie (no letter fallback).")
+
+
+    _br_live()
 # --- Standings ---
 with tabs[6]:
     st.subheader("Standings")
+    st.caption("Live standings update automatically every 5 seconds.")
 
-    # Optional auto-refresh (polling). Only affects this view-only tab.
-    if st_autorefresh is not None:
-        c_a, c_b = st.columns([1, 1])
-        with c_a:
-            auto = st.checkbox("Auto-refresh", value=False, help="Re-check the database periodically so you see other devices' updates.")
-        with c_b:
-            interval_s = st.selectbox("Interval", [2, 5, 10, 15], index=1, disabled=not auto)
-        if auto:
-            st_autorefresh(interval=int(interval_s) * 1000, key="standings_autorefresh")
-    else:
-        st.caption("Auto-refresh unavailable (missing dependency).")
+    @st.fragment(run_every=5)
+    def _standings_live():
+        computed = compute_all(players)
 
-    computed = compute_all(players)
-
-    totals = {p: 0 for p in players}
-    for ev in EVENTS:
-        for p in players:
-            totals[p] += computed[ev]["jj"].get(p, 0)
-
-    st.markdown("### Overall (Jimmy Jabs points) — only completed events count")
-    df_total = pd.DataFrame([{"player": display_player(p, name_map), "jj_total": totals[p]} for p in players])\
-        .sort_values(["jj_total", "player"], ascending=[False, True])
-    st.dataframe(df_total, width="stretch")
-
-    st.divider()
-    st.markdown("### By event (JJ points)")
-    rows = []
-    for p in players:
-        row = {"player": display_player(p, name_map)}
+        totals = {p: 0 for p in players}
         for ev in EVENTS:
-            row[ev] = computed[ev]["jj"][p]
-        row["Total"] = totals[p]
-        rows.append(row)
-    st.dataframe(pd.DataFrame(rows).sort_values(["Total", "player"], ascending=[False, True]), width="stretch")
+            for p in players:
+                totals[p] += computed[ev]["jj"].get(p, 0)
 
-    st.divider()
-    st.markdown("### How ties are resolved")
-    st.write("""
-When players have the same raw score, the app uses event-specific tie-breakers.
-If they are still tied, they remain tied (no letter fallback). JJ points then use **skipped placements** (e.g., two tie for 1st → both get 9, next gets 7).
-This prevents random reshuffling in the standings.
-""")
+        st.markdown("### Overall (Jimmy Jabs points) — only completed events count")
+        df_total = pd.DataFrame([{"player": display_player(p, name_map), "jj_total": totals[p]} for p in players])\
+            .sort_values(["jj_total", "player"], ascending=[False, True])
+        st.dataframe(df_total, width="stretch")
 
+        st.divider()
+        st.markdown("### By event (JJ points)")
+        rows = []
+        for p in players:
+            row = {"player": display_player(p, name_map)}
+            for ev in EVENTS:
+                row[ev] = computed[ev]["jj"][p]
+            row["Total"] = totals[p]
+            rows.append(row)
+        st.dataframe(pd.DataFrame(rows).sort_values(["Total", "player"], ascending=[False, True]), width="stretch")
+
+        st.divider()
+        st.markdown("### How ties are resolved")
+        st.write("""
+        When players have the same raw score, the app uses event-specific tie-breakers.
+        If they are still tied, they remain tied (no letter fallback). JJ points then use **skipped placements** (e.g., two tie for 1st → both get 9, next gets 7).
+        This prevents random reshuffling in the standings.
+        """)
+
+
+    _standings_live()
 # --- Admin ---
 with tabs[7]:
     admin_login_ui()
