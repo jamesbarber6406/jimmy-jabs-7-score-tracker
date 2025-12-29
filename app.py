@@ -617,23 +617,23 @@ def generate_equal_beerpong_schedule(players, rounds=5, games_per_player=4, trie
         schedule.append(entry)
 
 
-# Validate packing: no player can appear twice in the same round, and no match can contain duplicates.
-for entry in schedule:
-    used_round = set()
-    ms = entry.get("matches", []) or []
-    for mm in ms:
-        if mm is None:
-            continue
-        ta = mm.get("team_a", [])
-        tb = mm.get("team_b", [])
-        players_in_match = list(ta) + list(tb)
-        # Match must be exactly 4 distinct players
-        if len(players_in_match) != 4 or len(set(players_in_match)) != 4:
-            raise ValueError(f"Invalid match in round {entry.get('round_no')}: duplicate/missing players.")
-        # Round cannot reuse a player across matches
-        if not used_round.isdisjoint(players_in_match):
-            raise ValueError(f"Invalid round {entry.get('round_no')}: a player appears in multiple matches.")
-        used_round.update(players_in_match)
+    # Validate packing: no player can appear twice in the same round, and no match can contain duplicates.
+    for entry in schedule:
+        used_round = set()
+        ms = entry.get("matches", []) or []
+        for mm in ms:
+            if mm is None:
+                continue
+            ta = mm.get("team_a", [])
+            tb = mm.get("team_b", [])
+            players_in_match = list(ta) + list(tb)
+            # Match must be exactly 4 distinct players
+            if len(players_in_match) != 4 or len(set(players_in_match)) != 4:
+                raise ValueError(f"Invalid match in round {entry.get('round_no')}: duplicate/missing players.")
+            # Round cannot reuse a player across matches
+            if not used_round.isdisjoint(players_in_match):
+                raise ValueError(f"Invalid round {entry.get('round_no')}: a player appears in multiple matches.")
+            used_round.update(players_in_match)
 
     return schedule, best_score
 
@@ -1053,7 +1053,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
                     max_selections=2,
                     key=f"bp_edit_r{rno}_m{mi}_a",
                     disabled=is_event_locked("Beer Pong"),
-                    format_func=lambda p: display_player(p, name_map),
+                    format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
                 )
             with colB:
                 team_b = st.multiselect(
@@ -1063,7 +1063,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
                     max_selections=2,
                     key=f"bp_edit_r{rno}_m{mi}_b",
                     disabled=is_event_locked("Beer Pong"),
-                    format_func=lambda p: display_player(p, name_map),
+                    format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
                 )
 
             # Allow leaving a match blank (unscheduled slot)
@@ -1404,9 +1404,9 @@ with tabs[3]:
                     "place": place,
                     "player": display_player(p, name_map),
                     "raw_points": sp_raw[p],
-                    "1st_finishes": sp_cb[p][0],
-                    "2nd_finishes": sp_cb[p][1],
-                    "3rd_finishes": sp_cb[p][2],
+                    "1st_finishes": (list(sp_cb.get(p, [])) + [0,0,0])[0],
+                    "2nd_finishes": (list(sp_cb.get(p, [])) + [0,0,0])[1],
+                    "3rd_finishes": (list(sp_cb.get(p, [])) + [0,0,0])[2],
                     "adjustment": sp_adj[p],
                 })
             place += len(grp)
