@@ -906,7 +906,7 @@ def refresh_players():
     # If names are cleared (e.g., after a reset) we still want a usable default roster.
     # Default to the first 8 letters (A–H) so Beer Pong becomes 4 rounds and the app doesn't error.
     if len(p_list) == 0:
-        p_list = PLAYER_IDS[:8]
+        p_list = DEFAULT_PLAYERS[:]  # A–H
 
     return pdf, p_list, nmap
 
