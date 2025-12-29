@@ -683,26 +683,39 @@ def compute_beerpong_raw(players):
 def compute_telestrations_raw(players):
     results = fetch_event_results("Telestrations")
     raw = {p: 0 for p in players}
-    booklet_wins = {p: 0 for p in players}
+
+    booklet_full_wins = {p: 0 for p in players}
+    booklet_partial_wins = {p: 0 for p in players}
+    booklet_points = {p: 0 for p in players}
+
     response_pts = {p: 0 for p in players}
 
     for r in results:
         pl = r["payload"]
-        winners = pl.get("booklet_winners", [])
-        responses = pl["response_points"]
-        for w in winners:
-            booklet_wins[w] += 1
+        full = pl.get("booklet_winners", []) or []
+        partial = pl.get("booklet_partial_winners", []) or []
+        responses = pl.get("response_points", {}) or {}
+
+        for w in full:
+            if w in booklet_full_wins:
+                booklet_full_wins[w] += 1
+                booklet_points[w] += 10
+        for w in partial:
+            if w in booklet_partial_wins:
+                booklet_partial_wins[w] += 1
+                booklet_points[w] += 5
+
         for p in players:
-            rp = int(responses.get(p, 0))
+            rp = int(responses.get(p, 0) or 0)
             response_pts[p] += rp
-            raw[p] += rp + (10 if p in winners else 0)
+            raw[p] += rp + (10 if p in full else 0) + (5 if p in partial else 0)
 
     adj = adjustments_sum_by_player("Telestrations", players)
     for p in players:
         raw[p] += adj[p]
 
-    return raw, booklet_wins, response_pts, adj
-
+    # Return booklet_points for tie-breaking, plus full/partial counts for display
+    return raw, booklet_points, response_pts, adj, booklet_full_wins, booklet_partial_wins
 def compute_spoons_raw(players):
     results = fetch_event_results("Spoons")
     raw = {p: 0 for p in players}
@@ -835,8 +848,8 @@ def compute_all(players):
     bp_jj = jj_points_skipping_from_groups(bp_groups, len(players))
 
     # Telestrations: points -> booklet wins -> tie
-    tel_raw, tel_bw, tel_rp, tel_adj = compute_telestrations_raw(players)
-    tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
+    tel_raw, tel_bp, tel_rp, tel_adj, tel_full, tel_partial = compute_telestrations_raw(players)
+    tel_groups = build_tie_groups(players, tel_raw, [(tel_bp, True)])
     tel_jj = jj_points_skipping_from_groups(tel_groups, len(players))
 
     # Spoons: points -> countback (more 1sts, then 2nds, ...) -> tie
@@ -856,11 +869,17 @@ def compute_all(players):
     br_jj = jj_points_skipping_from_groups(br_groups, len(players))
 
     computed = {
-        "Beer Pong": {"raw": bp_raw, "groups": bp_groups, "jj": bp_jj, "wins": bp_wins, "cups": bp_cups, "cups_rem": bp_rem, "adj": bp_adj},
-        "Telestrations": {"raw": tel_raw, "groups": tel_groups, "jj": tel_jj, "booklet_wins": tel_bw, "response_points": tel_rp, "adj": tel_adj},
+        "Beer Pong": {
+            "raw": bp_raw, "groups": bp_groups, "jj": bp_jj,
+            "wins": bp_wins, "cups_sunk": bp_cups, "cups_remaining_total": bp_rem, "games": bp_games, "adj": bp_adj,
+        },
+        "Telestrations": {
+            "raw": tel_raw, "groups": tel_groups, "jj": tel_jj,
+            "booklet_points": tel_bp, "booklet_full_wins": tel_full, "booklet_partial_wins": tel_partial, "response_points": tel_rp, "adj": tel_adj,
+        },
         "Spoons": {"raw": sp_raw, "groups": sp_groups, "jj": sp_jj, "adj": sp_adj},
         "Secret Hitler": {"raw": sh_raw, "groups": sh_groups, "jj": sh_jj, "wins": sh_wins, "spicy_wins": sh_spicy, "adj": sh_adj},
-        "Breathalyzer": {"raw": br_raw, "groups": br_groups, "jj": br_jj, "closest": br_closest, "avg_error": br_avgerr, "adj": br_adj},
+        "Breathalyzer": {"raw": br_raw, "groups": br_groups, "jj": br_jj, "wins": br_wins, "closest": br_closest, "avg_error": br_avgerr, "adj": br_adj},
     }
 
     # JJ points only count if event completed
@@ -967,12 +986,13 @@ with tabs[0]:
         st.info("Tip: Locking events requires Admin PIN (Admin tab).")
 
 # --- Beer Pong ---
-with tabs[1]:
+
+def render_beer_pong_tab():
     st.subheader("Beer Pong")
     if is_event_locked("Beer Pong"):
         st.warning("Beer Pong is locked. Admin can unlock in Setup.")
     schedule = load_schedule()
-
+    
     c1, c2 = st.columns([1, 1])
     with c1:
         bp_rounds = 4 if len(players) == 8 else 5
@@ -1008,7 +1028,7 @@ with tabs[1]:
                 upsert_setting("beerpong_tries", str(int(tries)))
                 st.success(f"Generated. Score (lower better): {best_score:.2f}")
                 schedule = load_schedule()
-
+    
     with c2:
         if schedule:
             preview = []
@@ -1017,7 +1037,7 @@ with tabs[1]:
                 matches = r.get("matches", []) or []
                 m1 = matches[0] if len(matches) > 0 else None
                 m2 = matches[1] if len(matches) > 1 else None
-
+    
                 preview.append({
                     "Round": rno,
                     "Bye": (display_player(r["bye"], name_map) if r.get("bye") else "—"),
@@ -1025,8 +1045,8 @@ with tabs[1]:
                     "Match 2": (f'{display_team(m2["team_a"], name_map)} vs {display_team(m2["team_b"], name_map)}' if m2 else "—"),
                 })
             st.dataframe(pd.DataFrame(preview), width="stretch")
-
-with st.expander("Edit schedule (use this if you had to make up teams on the spot)", expanded=False):
+    
+    with st.expander("Edit schedule (use this if you had to make up teams on the spot)", expanded=False):
     st.caption("Edits overwrite the stored schedule. Each match must be 2v2, and a player cannot appear in both matches in the same round.")
     edited = {}
     # Build editable widgets per round
@@ -1037,7 +1057,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
         # Ensure two slots
         while len(matches) < 2:
             matches.append(None)
-
+    
         round_used = set()
         edited_matches = []
         for mi in range(2):
@@ -1065,12 +1085,12 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
                     disabled=is_event_locked("Beer Pong"),
                     format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
                 )
-
+    
             # Allow leaving a match blank (unscheduled slot)
             if len(team_a) == 0 and len(team_b) == 0:
                 edited_matches.append(None)
                 continue
-
+    
             # Validate 2v2
             if len(team_a) != 2 or len(team_b) != 2:
                 st.error("Each scheduled match must have exactly 2 players on Team A and 2 players on Team B (or leave both teams blank).")
@@ -1082,11 +1102,11 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
                 if not round_used.isdisjoint(match_players):
                     st.error(f"Round {rno}: a player appears in both matches.")
                 round_used.update(match_players)
-
+    
             edited_matches.append({"team_a": team_a, "team_b": team_b})
-
+    
         edited[rno] = {"round_no": int(rno), "bye": None, "matches": edited_matches}
-
+    
     if st.button("Save edited schedule", disabled=is_event_locked("Beer Pong")):
         # Final validation pass before saving
         ok = True
@@ -1107,7 +1127,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
             if not ok:
                 st.error(f"Cannot save: Round {rno} has an invalid match or overlapping players.")
                 break
-
+    
         if ok:
             clear_schedule()
             for rno in sorted(edited.keys()):
@@ -1116,13 +1136,13 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
             st.success("Saved. (If the preview above didn't update immediately, refresh the page.)")
         else:
             st.info("No schedule yet. Generate one.")
-
+    
     st.divider()
     if schedule:
         st.markdown("### Log a match")
         rno = st.selectbox("Round to log", sorted(schedule.keys()))
         r = schedule[rno]
-
+    
         # Only show matches that exist (some rounds may have 1 match)
         available = [i + 1 for i, mm in enumerate(r["matches"]) if mm is not None]
         if not available:
@@ -1130,12 +1150,12 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
         else:
             match_idx = st.radio("Match", available, horizontal=True)
             m = r["matches"][match_idx - 1]
-
+    
             st.write(
                 "Team A:", display_team(m["team_a"], name_map),
                 "vs Team B:", display_team(m["team_b"], name_map)
             )
-
+    
             with st.form(f"bp_log_form_{rno}_{match_idx}", clear_on_submit=True):
                 entered_by = st.selectbox(
                     "Entered by",
@@ -1143,7 +1163,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
                     format_func=lambda p: "—" if p == "" else display_player(p, name_map),
                     disabled=is_event_locked("Beer Pong"),
                 )
-
+    
                 winner = st.radio("Winner", ["A", "B"], horizontal=True, disabled=is_event_locked("Beer Pong"))
                 a_rem = st.number_input(
                     "Cups remaining (Team A)", min_value=0, max_value=6, value=0, step=1,
@@ -1158,7 +1178,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
                     "Close loss (both teams were at 1 cup)", value=suggested_close,
                     disabled=is_event_locked("Beer Pong")
                 )
-
+    
                 if st.form_submit_button("Save match result", disabled=is_event_locked("Beer Pong")):
                     insert_event_result("Beer Pong", int(rno), {
                         "round_no": int(rno),
@@ -1196,7 +1216,7 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
             st.dataframe(pd.DataFrame(rows), width="stretch")
         else:
             st.info("No Beer Pong matches logged yet.")
-
+    
         st.markdown("### Current Beer Pong standings (raw)")
         bp_raw, bp_wins, bp_games, bp_cups, bp_adj = compute_beerpong_raw(players)
         bp_results2 = fetch_event_results("Beer Pong")
@@ -1226,9 +1246,13 @@ with st.expander("Edit schedule (use this if you had to make up teams on the spo
             })
         st.dataframe(pd.DataFrame(detail), width="stretch")
         st.caption("Tie-breakers: points → wins → cups sunk → cups remaining total → tie (no letter fallback).")
-
-
+    
+    
     _bp_live()
+
+with tabs[1]:
+    render_beer_pong_tab()
+
 # --- Telestrations ---
 with tabs[2]:
     st.subheader("Telestrations")
@@ -1258,6 +1282,16 @@ with tabs[2]:
             disabled=is_event_locked("Telestrations"),
         )
 
+        partial_winners = st.multiselect(
+            "Booklet partial winners (5 points each) — leave empty if none",
+            [p for p in players if p not in winners],
+            default=[],
+            key="tel_partial_winners",
+            format_func=lambda x: display_player(x, name_map),
+            disabled=is_event_locked("Telestrations"),
+        )
+
+
         df = pd.DataFrame({
             "player": players,
             "name": [display_player(p, name_map) for p in players],
@@ -1281,7 +1315,13 @@ with tabs[2]:
             insert_event_result(
                 "Telestrations",
                 int(round_no),
-                {"round_no": int(round_no), "booklet_winners": winners, "response_points": resp, "entered_by": (entered_by if entered_by else None)},
+                {
+                    "round_no": int(round_no),
+                    "booklet_winners": winners,
+                    "booklet_partial_winners": partial_winners,
+                    "response_points": resp,
+                    "entered_by": (entered_by if entered_by else None),
+                },
             )
             st.success("Saved.")
             st.rerun()
@@ -1293,6 +1333,7 @@ with tabs[2]:
             st.dataframe(pd.DataFrame([
                 {"id": r["id"], "Round": r["round_no"],
                  "Booklet winners": ", ".join([display_player(w, name_map) for w in r["payload"].get("booklet_winners", [])]) or "(none)",
+                 "Booklet partial winners": ", ".join([display_player(w, name_map) for w in r["payload"].get("booklet_partial_winners", [])]) or "(none)",
                  "Created": r["created_at"]}
                 for r in tel_results
             ]), width="stretch")
@@ -1300,8 +1341,8 @@ with tabs[2]:
             st.info("No telestrations rounds logged yet.")
 
         st.markdown("### Current Telestrations standings (raw)")
-        tel_raw, tel_bw, tel_rp, tel_adj = compute_telestrations_raw(players)
-        tel_groups = build_tie_groups(players, tel_raw, [(tel_bw, True)])
+    tel_raw, tel_bp, tel_rp, tel_adj, tel_full, tel_partial = compute_telestrations_raw(players)
+    tel_groups = build_tie_groups(players, tel_raw, [(tel_bp, True)])
 
         detail = []
         place = 1
@@ -1311,13 +1352,16 @@ with tabs[2]:
                     "place": place,
                     "player": display_player(p, name_map),
                     "raw_points": tel_raw[p],
-                    "booklet_wins": tel_bw[p],
+                    "booklet_points": tel_bp[p],
+                    "booklet_full_wins": tel_full[p],
+                    "booklet_partial_wins": tel_partial[p],
+                    "response_points_total": tel_rp[p],
                     "adjustment": tel_adj[p],
                 })
             place += len(group)
 
         st.dataframe(pd.DataFrame(detail), width="stretch")
-        st.caption("Tie-breakers: points → booklet wins → tie (no letter fallback).")
+        st.caption("Tie-breakers: points → booklet points (10 full / 5 partial) → tie (no letter fallback).")
 
 
     _tel_live()
