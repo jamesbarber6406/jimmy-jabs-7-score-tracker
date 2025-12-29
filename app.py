@@ -879,7 +879,7 @@ def compute_all(players):
         },
         "Spoons": {"raw": sp_raw, "groups": sp_groups, "jj": sp_jj, "adj": sp_adj},
         "Secret Hitler": {"raw": sh_raw, "groups": sh_groups, "jj": sh_jj, "wins": sh_wins, "spicy_wins": sh_spicy, "adj": sh_adj},
-        "Breathalyzer": {"raw": br_raw, "groups": br_groups, "jj": br_jj, "wins": br_wins, "closest": br_closest, "avg_error": br_avgerr, "adj": br_adj},
+        "Breathalyzer": {"raw": br_raw, "groups": br_groups, "jj": br_jj, "closest": br_closest, "avg_error": br_avgerr, "adj": br_adj},
     }
 
     # JJ points only count if event completed
