@@ -903,6 +903,11 @@ def refresh_players():
     active_mask = pdf["name"].astype(str).str.strip() != ""
     p_list = pdf.loc[active_mask, "letter"].tolist()
 
+    # If names are cleared (e.g., after a reset) we still want a usable default roster.
+    # Default to the first 8 letters (A–H) so Beer Pong becomes 4 rounds and the app doesn't error.
+    if len(p_list) == 0:
+        p_list = PLAYER_IDS[:8]
+
     return pdf, p_list, nmap
 
 players_df, players, name_map = refresh_players()
