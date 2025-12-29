@@ -1047,95 +1047,95 @@ def render_beer_pong_tab():
             st.dataframe(pd.DataFrame(preview), width="stretch")
     
     with st.expander("Edit schedule (use this if you had to make up teams on the spot)", expanded=False):
-    st.caption("Edits overwrite the stored schedule. Each match must be 2v2, and a player cannot appear in both matches in the same round.")
-    edited = {}
-    # Build editable widgets per round
-    for rno in sorted(schedule.keys()):
-        r = schedule[rno]
-        st.markdown(f"**Round {rno}**")
-        matches = (r.get("matches") or [])
-        # Ensure two slots
-        while len(matches) < 2:
-            matches.append(None)
+        st.caption("Edits overwrite the stored schedule. Each match must be 2v2, and a player cannot appear in both matches in the same round.")
+        edited = {}
+        # Build editable widgets per round
+        for rno in sorted(schedule.keys()):
+            r = schedule[rno]
+            st.markdown(f"**Round {rno}**")
+            matches = (r.get("matches") or [])
+            # Ensure two slots
+            while len(matches) < 2:
+                matches.append(None)
     
-        round_used = set()
-        edited_matches = []
-        for mi in range(2):
-            mm = matches[mi]
-            default_a = (mm.get("team_a") if mm else []) or []
-            default_b = (mm.get("team_b") if mm else []) or []
-            colA, colB = st.columns(2)
-            with colA:
-                team_a = st.multiselect(
-                    f"Match {mi+1} – Team A",
-                    options=players,
-                    default=default_a,
-                    max_selections=2,
-                    key=f"bp_edit_r{rno}_m{mi}_a",
-                    disabled=is_event_locked("Beer Pong"),
-                    format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
-                )
-            with colB:
-                team_b = st.multiselect(
-                    f"Match {mi+1} – Team B",
-                    options=players,
-                    default=default_b,
-                    max_selections=2,
-                    key=f"bp_edit_r{rno}_m{mi}_b",
-                    disabled=is_event_locked("Beer Pong"),
-                    format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
-                )
+            round_used = set()
+            edited_matches = []
+            for mi in range(2):
+                mm = matches[mi]
+                default_a = (mm.get("team_a") if mm else []) or []
+                default_b = (mm.get("team_b") if mm else []) or []
+                colA, colB = st.columns(2)
+                with colA:
+                    team_a = st.multiselect(
+                        f"Match {mi+1} – Team A",
+                        options=players,
+                        default=default_a,
+                        max_selections=2,
+                        key=f"bp_edit_r{rno}_m{mi}_a",
+                        disabled=is_event_locked("Beer Pong"),
+                        format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
+                    )
+                with colB:
+                    team_b = st.multiselect(
+                        f"Match {mi+1} – Team B",
+                        options=players,
+                        default=default_b,
+                        max_selections=2,
+                        key=f"bp_edit_r{rno}_m{mi}_b",
+                        disabled=is_event_locked("Beer Pong"),
+                        format_func=lambda p: (f"{p} — {name_map.get(p)}" if name_map.get(p) else p),
+                    )
     
-            # Allow leaving a match blank (unscheduled slot)
-            if len(team_a) == 0 and len(team_b) == 0:
-                edited_matches.append(None)
-                continue
-    
-            # Validate 2v2
-            if len(team_a) != 2 or len(team_b) != 2:
-                st.error("Each scheduled match must have exactly 2 players on Team A and 2 players on Team B (or leave both teams blank).")
-            overlap = set(team_a).intersection(team_b)
-            if overlap:
-                st.error(f"Match {mi+1}: the same player is on both teams: {', '.join(overlap)}")
-            match_players = set(team_a) | set(team_b)
-            if len(match_players) == 4:
-                if not round_used.isdisjoint(match_players):
-                    st.error(f"Round {rno}: a player appears in both matches.")
-                round_used.update(match_players)
-    
-            edited_matches.append({"team_a": team_a, "team_b": team_b})
-    
-        edited[rno] = {"round_no": int(rno), "bye": None, "matches": edited_matches}
-    
-    if st.button("Save edited schedule", disabled=is_event_locked("Beer Pong")):
-        # Final validation pass before saving
-        ok = True
-        for rno, rr in edited.items():
-            used_round = set()
-            for mm in rr["matches"]:
-                if mm is None:
+                # Allow leaving a match blank (unscheduled slot)
+                if len(team_a) == 0 and len(team_b) == 0:
+                    edited_matches.append(None)
                     continue
-                ta = mm["team_a"]; tb = mm["team_b"]
-                if len(ta) != 2 or len(tb) != 2:
-                    ok = False
-                mp = ta + tb
-                if len(mp) != 4 or len(set(mp)) != 4:
-                    ok = False
-                if not used_round.isdisjoint(mp):
-                    ok = False
-                used_round.update(mp)
-            if not ok:
-                st.error(f"Cannot save: Round {rno} has an invalid match or overlapping players.")
-                break
     
-        if ok:
-            clear_schedule()
-            for rno in sorted(edited.keys()):
-                store_schedule(int(rno), edited[rno])
-            schedule = load_schedule()
-            st.success("Saved. (If the preview above didn't update immediately, refresh the page.)")
-        else:
-            st.info("No schedule yet. Generate one.")
+                # Validate 2v2
+                if len(team_a) != 2 or len(team_b) != 2:
+                    st.error("Each scheduled match must have exactly 2 players on Team A and 2 players on Team B (or leave both teams blank).")
+                overlap = set(team_a).intersection(team_b)
+                if overlap:
+                    st.error(f"Match {mi+1}: the same player is on both teams: {', '.join(overlap)}")
+                match_players = set(team_a) | set(team_b)
+                if len(match_players) == 4:
+                    if not round_used.isdisjoint(match_players):
+                        st.error(f"Round {rno}: a player appears in both matches.")
+                    round_used.update(match_players)
+    
+                edited_matches.append({"team_a": team_a, "team_b": team_b})
+    
+            edited[rno] = {"round_no": int(rno), "bye": None, "matches": edited_matches}
+    
+        if st.button("Save edited schedule", disabled=is_event_locked("Beer Pong")):
+            # Final validation pass before saving
+            ok = True
+            for rno, rr in edited.items():
+                used_round = set()
+                for mm in rr["matches"]:
+                    if mm is None:
+                        continue
+                    ta = mm["team_a"]; tb = mm["team_b"]
+                    if len(ta) != 2 or len(tb) != 2:
+                        ok = False
+                    mp = ta + tb
+                    if len(mp) != 4 or len(set(mp)) != 4:
+                        ok = False
+                    if not used_round.isdisjoint(mp):
+                        ok = False
+                    used_round.update(mp)
+                if not ok:
+                    st.error(f"Cannot save: Round {rno} has an invalid match or overlapping players.")
+                    break
+    
+            if ok:
+                clear_schedule()
+                for rno in sorted(edited.keys()):
+                    store_schedule(int(rno), edited[rno])
+                schedule = load_schedule()
+                st.success("Saved. (If the preview above didn't update immediately, refresh the page.)")
+            else:
+                st.info("No schedule yet. Generate one.")
     
     st.divider()
     if schedule:
@@ -1341,8 +1341,8 @@ with tabs[2]:
             st.info("No telestrations rounds logged yet.")
 
         st.markdown("### Current Telestrations standings (raw)")
-    tel_raw, tel_bp, tel_rp, tel_adj, tel_full, tel_partial = compute_telestrations_raw(players)
-    tel_groups = build_tie_groups(players, tel_raw, [(tel_bp, True)])
+        tel_raw, tel_bp, tel_rp, tel_adj, tel_full, tel_partial = compute_telestrations_raw(players)
+        tel_groups = build_tie_groups(players, tel_raw, [(tel_bp, True)])
 
         detail = []
         place = 1
