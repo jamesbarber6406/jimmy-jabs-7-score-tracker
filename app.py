@@ -450,7 +450,7 @@ def generate_equal_beerpong_schedule(players, rounds=5, games_per_player=4, trie
     """Generate a 2v2 Beer Pong schedule.
 
     Goal: each player plays exactly `games_per_player` matches.
-    With 9 players and games_per_player=4 -> total matches = 9.
+    With 8 players and games_per_player=4 -> total matches = 8.
     We then pack those matches into `rounds` rounds (default 5), with up to 2 matches per round.
     """
     rng = random.Random(seed)
@@ -894,6 +894,10 @@ seed_default_players()
 def refresh_players():
     # Full roster from DB (used for Setup editor)
     pdf = get_players_df()
+
+    # This app is configured for 8 players. Some legacy DBs may still have an extra 9th row (I).
+    # We always restrict the editable roster + all scheduling/scoring to A–H.
+    pdf = pdf[pdf["letter"].isin(DEFAULT_PLAYERS)].copy()
 
     # Name map for display (includes blank names)
     nmap = {row["letter"]: row["name"] for _, row in pdf.iterrows()}
@@ -1581,7 +1585,7 @@ with tabs[7]:
     if is_admin():
         st.divider()
         st.markdown("## Tournament reset")
-        clear_names = st.checkbox("Also clear player names (A–I mapping)", value=True)
+        clear_names = st.checkbox("Also clear player names (A–H mapping)", value=True)
         confirm = st.text_input("Type RESET to enable the reset button")
         if st.button("RESET TOURNAMENT", disabled=(confirm.strip().upper() != "RESET")):
             reset_tournament(clear_names=clear_names)
