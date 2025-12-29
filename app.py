@@ -531,34 +531,79 @@ def generate_equal_beerpong_schedule(players, rounds=5, games_per_player=4, trie
         raise ValueError("Could not generate a schedule with the requested constraints.")
 
     # Pack matches into rounds (up to 2 matches per round) without player overlap within a round.
+    # For 8 players with 4 rounds and 8 total matches, we can (and should) pack so every round uses all 8 players
+    # (2 matches per round, no overlap). If we can't, keep reshuffling and retry a small backtracking search.
     rounds_list = [[] for _ in range(rounds)]
-    used_in_round = [set() for _ in range(rounds)]
-    # shuffle to pack varied
-    rng.shuffle(best_matches)
-    for match in best_matches:
-        a1,a2,b1,b2 = match
-        players_in = {a1,a2,b1,b2}
-        placed = False
+
+    def can_place(round_idx, match):
+        a1, a2, b1, b2 = match
+        players_in = {a1, a2, b1, b2}
+        if len(rounds_list[round_idx]) >= 2:
+            return False
+        used = set()
+        for mm in rounds_list[round_idx]:
+            used.update({mm[0], mm[1], mm[2], mm[3]})
+        return used.isdisjoint(players_in)
+
+    def backtrack_assign(matches, i=0):
+        if i == len(matches):
+            return True
+        match = matches[i]
+        # try to place in any round where it fits
         for r in range(rounds):
-            if len(rounds_list[r]) >= 2:
-                continue
-            if used_in_round[r].isdisjoint(players_in):
+            if can_place(r, match):
                 rounds_list[r].append(match)
-                used_in_round[r].update(players_in)
-                placed = True
-                break
-        if not placed:
-            # if we can't place without overlap, just place in the round with space (overlap allowed as last resort)
+                if backtrack_assign(matches, i + 1):
+                    return True
+                rounds_list[r].pop()
+        return False
+
+    # If we are in the 8-player / 4-round exact-fill case, enforce perfect packing (no byes).
+    exact_fill = (len(players) == 8 and rounds == 4 and total_matches == 8)
+    if exact_fill:
+        ok = False
+        # Try a few reshuffles to find a perfect packing
+        for _ in range(250):
             for r in range(rounds):
-                if len(rounds_list[r]) < 2:
+                rounds_list[r].clear()
+            trial = best_matches[:]
+            rng.shuffle(trial)
+            if backtrack_assign(trial, 0):
+                # Ensure each round has exactly 2 matches (everyone plays every round)
+                if all(len(rr) == 2 for rr in rounds_list):
+                    ok = True
+                    break
+        if not ok:
+            # Fall back to greedy packing (should be very rare)
+            for r in range(rounds):
+                rounds_list[r].clear()
+
+    if not exact_fill or not all(len(rr) == 2 for rr in rounds_list):
+        used_in_round = [set() for _ in range(rounds)]
+        rng.shuffle(best_matches)
+        for match in best_matches:
+            a1, a2, b1, b2 = match
+            players_in = {a1, a2, b1, b2}
+            placed = False
+            for r in range(rounds):
+                if len(rounds_list[r]) >= 2:
+                    continue
+                if used_in_round[r].isdisjoint(players_in):
                     rounds_list[r].append(match)
                     used_in_round[r].update(players_in)
                     placed = True
                     break
-        if not placed:
-            # shouldn't happen
-            rounds_list.append([match])
-            used_in_round.append(set(players_in))
+            if not placed:
+                # if we can't place without overlap, just place in the round with space (overlap allowed as last resort)
+                for r in range(rounds):
+                    if len(rounds_list[r]) < 2:
+                        rounds_list[r].append(match)
+                        used_in_round[r].update(players_in)
+                        placed = True
+                        break
+            if not placed:
+                # shouldn't happen
+                rounds_list.append([match])
 
     # Build stored schedule format expected by UI: each round has 2 match slots; if missing, use None.
     schedule = []
@@ -1000,8 +1045,6 @@ with tabs[1]:
                     st.success("Saved.")
                     st.rerun()
     st.divider()
-
-    @st.fragment(run_every=10)
     def _bp_live():
         st.markdown("### Logged matches")
         bp_results = fetch_event_results("Beer Pong")
@@ -1114,8 +1157,6 @@ with tabs[2]:
             st.success("Saved.")
             st.rerun()
     st.divider()
-
-    @st.fragment(run_every=12)
     def _tel_live():
         tel_results = fetch_event_results("Telestrations")
         if tel_results:
@@ -1193,8 +1234,6 @@ with tabs[3]:
                 st.success("Saved.")
                 st.rerun()
     st.divider()
-
-    @st.fragment(run_every=12)
     def _sp_live():
         sp_results = fetch_event_results("Spoons")
         if sp_results:
@@ -1325,8 +1364,6 @@ with tabs[4]:
                 st.rerun()
 
     st.divider()
-
-    @st.fragment(run_every=12)
     def _sh_live():
 
         sh_results = fetch_event_results("Secret Hitler")
@@ -1448,8 +1485,6 @@ with tabs[5]:
             st.success("Saved.")
             st.rerun()
     st.divider()
-
-    @st.fragment(run_every=12)
     def _br_live():
         br_results = fetch_event_results("Breathalyzer")
         if br_results:
@@ -1492,8 +1527,6 @@ with tabs[5]:
 with tabs[6]:
     st.subheader("Standings")
     st.caption("Live standings update automatically every 5 seconds.")
-
-    @st.fragment(run_every=5)
     def _standings_live():
         computed = compute_all(players)
 
