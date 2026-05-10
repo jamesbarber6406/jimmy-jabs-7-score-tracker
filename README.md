@@ -1,5 +1,10 @@
 # Jimmy Jabs Tournament Tracker (Streamlit)
 
+Jimmy Jabs is a semi-regular games olympics which I host for friends. Players compete in various events which provide points for individuals. After all events have taken place, the player with the most points is crowned the victor. This was the 7th Jimmy Jabs tournament to take place which hosted 8 players, participating in 5 events. 
+
+This app was created so that players could submit their own scores after each game and track ranks in real-time. It was programmed using python and hosted using Streamlit and PostgreSQL. 
+
+
 ## Quick start
 ```bash
 pip install -r requirements.txt
